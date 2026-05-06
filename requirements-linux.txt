@@ -4,6 +4,7 @@ numpy
 dearpygui
 pyautogui
 jeepney
+keyboard
 
 # PyGObject (gi) must be installed via system package manager, NOT pip:
 #   Arch/CachyOS: sudo pacman -S python-gobject
