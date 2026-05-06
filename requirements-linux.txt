@@ -2,7 +2,7 @@
 opencv-python-headless
 numpy
 dearpygui
-pyautogui
+pynput
 jeepney
 keyboard
 
