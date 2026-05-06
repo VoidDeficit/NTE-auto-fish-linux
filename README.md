@@ -8,6 +8,8 @@
 
 Built with Python, OpenCV, MSS, PyDirectInput, and DearPyGui.
 
+> **Platform Support:** Originally Windows-only. Now also supports **Linux** with **Wayland**, **KDE Plasma**, and **CachyOS** — including native screen capture and input via XWayland/portal backends.
+
 ---
 
 [![GitHub License](https://img.shields.io/github/license/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/blob/main/LICENSE)
@@ -25,6 +27,7 @@ Built with Python, OpenCV, MSS, PyDirectInput, and DearPyGui.
 - **Resolution adaptation**: Ratio-based ROI calibration with resolution-proportional fallback supports 1080p, 2K, 4K, and custom display sizes automatically.
 - **Fast capture and input**: `mss` captures screen regions efficiently, while `PyDirectInput` sends game-friendly input events.
 - **Portable builds**: GitHub Actions produces a single-file Windows EXE for GUI and a lightweight source package for CLI that auto-installs dependencies on first run.
+- **Linux support**: Runs on Wayland (KDE Plasma, CachyOS) via XWayland or portal-based capture backends.
 
 ## Project Structure
 
@@ -74,6 +77,7 @@ python main.py
 ## Notes
 
 - Run from an elevated terminal on Windows.
+- On **Linux (Wayland / KDE / CachyOS)**: run from a terminal; no root required. Screen capture uses XWayland or the PipeWire/portal backend depending on your setup.
 - Borderless window or windowed fullscreen usually gives the most reliable capture behavior.
 - Hotkeys are configurable in the GUI and re-register after editing.
 - Debug logging writes extra tracking data to `fishing_data.csv`.

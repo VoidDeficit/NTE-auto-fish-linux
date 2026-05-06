@@ -429,6 +429,7 @@ class NTEFishingBot:
 
     def _handle_idle(self) -> None:
         self._log("[IDLE] Casting...")
+        self._log(f"[DEBUG] Key PRESS → {self.cfg.keys.cast.upper()}")
         self.input.press(self.cfg.keys.cast, self.cfg.timing.key_press_duration)
         # Check for error dialog shortly after cast (dialog appears immediately)
         self._stop_event.wait(timeout=0.3)
@@ -533,14 +534,19 @@ class NTEFishingBot:
             if output > deadband:
                 self.input.hold(self.cfg.keys.right)
                 self.input.release(self.cfg.keys.left)
+                if action != "RIGHT":
+                    self._log(f"[DEBUG] Key HOLD → {self.cfg.keys.right.upper()} (output={output:.2f})")
                 action = "RIGHT"
             elif output < -deadband:
                 self.input.hold(self.cfg.keys.left)
                 self.input.release(self.cfg.keys.right)
+                if action != "LEFT":
+                    self._log(f"[DEBUG] Key HOLD → {self.cfg.keys.left.upper()} (output={output:.2f})")
                 action = "LEFT"
             else:
                 self.input.release(self.cfg.keys.left)
                 self.input.release(self.cfg.keys.right)
+                self._log(f"[DEBUG] Keys RELEASED (in deadband, output={output:.2f})")
         else:
             self.input.release(self.cfg.keys.left)
             self.input.release(self.cfg.keys.right)
@@ -652,7 +658,8 @@ class NTEFishingBot:
             return
 
         self._fish_count += 1
-        self._log(f"[RESULT] Fish #{self._fish_count}.")
+        self._log(f"[RESULT] ✓ Fish caught! Total: #{self._fish_count} 🐟")
+        self._log(f"[DEBUG] Key PRESS → {self.cfg.keys.exit.upper()} (closing result screen)")
         if self.cfg.result_close_method == "click":
             cx = self._screen_w // 2 if self._screen_w else _RESULT_CLOSE_FALLBACK_X
             cy = self._screen_h // 2 if self._screen_h else _RESULT_CLOSE_FALLBACK_Y
