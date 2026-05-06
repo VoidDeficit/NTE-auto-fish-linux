@@ -10,36 +10,42 @@ on:
 
 jobs:
   # ── Linux (Wayland / KDE / CachyOS) ───────────────────────────────────────
+  # Built inside an Arch Linux container so bundled libraries are ABI-compatible
+  # with Arch-based targets (CachyOS, Manjaro, etc.) without version mismatches.
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
     permissions:
       contents: write
 
     steps:
+    - name: Bootstrap pacman and install git
+      run: pacman -Syu --noconfirm git
+
     - uses: actions/checkout@v4
 
-    - name: Install system build dependencies
+    - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          python3 python3-pip python3-gi python3-gi-cairo python3-venv \
+        pacman -S --noconfirm \
+          python python-pip python-gobject python-gobject-cairo \
           gobject-introspection \
-          gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-          gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
-          libcairo2-dev pkg-config \
-          libxtst-dev libxdo-dev \
-          fuse libfuse2
+          gstreamer gst-plugins-base gst-plugins-good \
+          pipewire gst-plugin-pipewire \
+          libxtst xdotool \
+          fuse2 wget imagemagick
 
-    # python3-gi must come from apt (PyGObject >= 3.52 requires GLib 2.80+
-    # which Ubuntu 22.04 does not have). System python3-gi is the safe pairing.
+    - name: Create venv (inherits system python-gobject)
+      run: python -m venv --system-site-packages /opt/venv
+
     - name: Install Python dependencies
       run: |
-        sudo pip3 install \
+        /opt/venv/bin/pip install \
           opencv-python-headless numpy dearpygui pynput jeepney keyboard pyinstaller
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onedir \
+        /opt/venv/bin/pyinstaller --noconfirm --onedir \
           --collect-all gi \
           --collect-all dearpygui \
           --hidden-import jeepney \
@@ -64,40 +70,35 @@ jobs:
             xargs -I{} cp {} dist/NTE-Auto-Fish/girepository-1.0/ || true
         done
 
-    - name: Remove bundled GLib/GStreamer .so files
-      # PyInstaller copies Ubuntu 22.04's libglib/libgstreamer into the bundle.
-      # On Arch/CachyOS those older versions load first (via LD_LIBRARY_PATH),
-      # causing a version mismatch that prevents GStreamer plugins (pipewiresrc)
-      # from registering. Deleting them forces the system libs to be used instead.
-      # The gi Python extension has a stable enough ABI to work with newer GLib.
+    - name: Remove bundled GLib/GIO/GStreamer/system .so files
+      # Keep only pure Python .so extensions; let the system provide all GLib
+      # ecosystem libs so GStreamer plugin loading (pipewiresrc) works correctly.
       run: |
-        find dist/NTE-Auto-Fish -name "libglib-*.so*"        -delete
-        find dist/NTE-Auto-Fish -name "libgobject-*.so*"     -delete
-        find dist/NTE-Auto-Fish -name "libgmodule-*.so*"     -delete
-        find dist/NTE-Auto-Fish -name "libgio-*.so*"         -delete
-        find dist/NTE-Auto-Fish -name "libgstreamer-*.so*"   -delete
-        find dist/NTE-Auto-Fish -name "libgst*.so*"          -delete
-        find dist/NTE-Auto-Fish -name "libgirepository-*.so*" -delete
-        find dist/NTE-Auto-Fish -name "libffi*.so*"          -delete
-        find dist/NTE-Auto-Fish -name "libpcre*.so*"         -delete
+        find dist/NTE-Auto-Fish -name "libglib-*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libgobject-*.so*"       -delete
+        find dist/NTE-Auto-Fish -name "libgmodule-*.so*"       -delete
+        find dist/NTE-Auto-Fish -name "libgio-*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libgstreamer-*.so*"     -delete
+        find dist/NTE-Auto-Fish -name "libgst*.so*"            -delete
+        find dist/NTE-Auto-Fish -name "libgirepository-*.so*"  -delete
+        find dist/NTE-Auto-Fish -name "libffi*.so*"            -delete
+        find dist/NTE-Auto-Fish -name "libpcre*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libmount.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libblkid.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libselinux.so*"         -delete
+        find dist/NTE-Auto-Fish -name "libz.so*"               -delete
+        find dist/NTE-Auto-Fish -name "libzstd.so*"            -delete
 
     - name: Create AppDir structure
       run: |
         mkdir -p AppDir/usr/bin
         cp -r dist/NTE-Auto-Fish AppDir/usr/bin/NTE-Auto-Fish-bundle
 
-        # AppRun: sets up paths so gi finds bundled typelibs, then launches
         cat > AppDir/AppRun << 'EOF'
         #!/bin/bash
         HERE="$(dirname "$(readlink -f "$0")")"
         BUNDLE="$HERE/usr/bin/NTE-Auto-Fish-bundle"
-
-        # Prepend bundled typelibs; fall back to system ones for any missing
         export GI_TYPELIB_PATH="$BUNDLE/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
-
-        # Bundled Python libs first, then system (so system GStreamer .so wins)
-        export LD_LIBRARY_PATH="$BUNDLE${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
         exec "$BUNDLE/NTE-Auto-Fish" "$@"
         EOF
         chmod +x AppDir/AppRun
@@ -111,7 +112,6 @@ jobs:
         Categories=Game;Utility;
         EOF
 
-        # Minimal placeholder icon (appimagetool requires one)
         convert -size 256x256 xc:#1a1a2e -fill white \
           -font DejaVu-Sans -pointsize 48 -gravity center \
           -annotate 0 "NTE" AppDir/NTE-Auto-Fish.png 2>/dev/null || \
