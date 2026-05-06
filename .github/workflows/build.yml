@@ -32,7 +32,7 @@ jobs:
     - name: Install system dependencies
       run: |
         pacman -S --noconfirm \
-          python python-pip python-gobject python-gobject-cairo \
+          python python-pip python-gobject \
           gobject-introspection \
           gstreamer gst-plugins-base gst-plugins-good \
           pipewire gst-plugin-pipewire \
