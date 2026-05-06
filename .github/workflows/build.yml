@@ -35,7 +35,7 @@ jobs:
     - name: Install Python dependencies
       run: |
         sudo pip3 install \
-          opencv-python-headless numpy dearpygui pyautogui jeepney keyboard pyinstaller
+          opencv-python-headless numpy dearpygui pynput jeepney keyboard pyinstaller
 
     - name: Build with PyInstaller
       run: |

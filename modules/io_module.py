@@ -1,24 +1,38 @@
 """
 Screen capture and input helpers.
 CaptureModule uses XDG Desktop Portal + PipeWire + GStreamer for fast Wayland capture.
-InputModule uses pyautogui for keyboard/mouse input.
+InputModule uses pynput for keyboard/mouse input (no tkinter dependency).
 """
 import threading
 import time
 
 import cv2
 import numpy as np
-import pyautogui
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 from jeepney import DBusAddress, new_method_call, MessageType
 from jeepney.io.blocking import open_dbus_connection
+from pynput.keyboard import Controller as _KbController, Key as _Key
+from pynput.mouse import Controller as _MouseController, Button as _Button
 
 Gst.init(None)
 
-pyautogui.PAUSE = 0.0
-pyautogui.FAILSAFE = False
+# Map pyautogui-style string names to pynput Key objects
+_KEY_MAP: dict[str, _Key] = {
+    'left': _Key.left, 'right': _Key.right,
+    'up': _Key.up, 'down': _Key.down,
+    'space': _Key.space, 'enter': _Key.enter,
+    'esc': _Key.esc, 'escape': _Key.esc,
+    'tab': _Key.tab, 'backspace': _Key.backspace,
+    'shift': _Key.shift, 'ctrl': _Key.ctrl, 'alt': _Key.alt,
+    'f1': _Key.f1, 'f2': _Key.f2, 'f3': _Key.f3, 'f4': _Key.f4,
+    'f5': _Key.f5, 'f6': _Key.f6, 'f7': _Key.f7, 'f8': _Key.f8,
+    'f9': _Key.f9, 'f10': _Key.f10, 'f11': _Key.f11, 'f12': _Key.f12,
+}
+
+def _resolve(key: str):
+    return _KEY_MAP.get(key.lower(), key)
 
 # Create dbus connection at module level — same as working portal_full.py
 _conn = open_dbus_connection(bus='SESSION')
@@ -198,18 +212,21 @@ class CaptureModule:
 
 class InputModule:
     """
-    pyautogui-based input wrapper that tracks held keys.
+    pynput-based input wrapper that tracks held keys.
     Thread-safe.
     """
 
     def __init__(self) -> None:
         self._held: set[str] = set()
         self._lock = threading.Lock()
+        self._kb = _KbController()
+        self._mouse = _MouseController()
 
     def press(self, key: str, duration: float = 0.05) -> None:
-        pyautogui.keyDown(key)
+        k = _resolve(key)
+        self._kb.press(k)
         time.sleep(duration)
-        pyautogui.keyUp(key)
+        self._kb.release(k)
 
     def hold(self, key: str) -> None:
         with self._lock:
@@ -217,7 +234,7 @@ class InputModule:
                 return
             self._held.add(key)
         try:
-            pyautogui.keyDown(key)
+            self._kb.press(_resolve(key))
         except Exception:
             with self._lock:
                 self._held.discard(key)
@@ -228,7 +245,7 @@ class InputModule:
             if key not in self._held:
                 return
             self._held.discard(key)
-        pyautogui.keyUp(key)
+        self._kb.release(_resolve(key))
 
     def release_all(self) -> None:
         with self._lock:
@@ -236,9 +253,10 @@ class InputModule:
             self._held.clear()
         for key in keys:
             try:
-                pyautogui.keyUp(key)
+                self._kb.release(_resolve(key))
             except Exception:
                 pass
 
     def click(self, x: int, y: int) -> None:
-        pyautogui.click(x, y)
+        self._mouse.position = (x, y)
+        self._mouse.click(_Button.left)
