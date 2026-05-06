@@ -56,10 +56,6 @@ jobs:
           start_gui.py
 
     - name: Bundle GStreamer typelibs
-      # Typelibs are small metadata files — bundling them means gi works
-      # without needing the exact same GStreamer version installed.
-      # The actual .so libs are intentionally left to the system (PipeWire
-      # integration requires the running system's GStreamer/PipeWire stack).
       run: |
         mkdir -p dist/NTE-Auto-Fish/girepository-1.0
         for typelib in Gst-1.0 GstBase-1.0 GstPbutils-1.0 GstApp-1.0 \
@@ -67,6 +63,23 @@ jobs:
           find /usr/lib -name "${typelib}.typelib" 2>/dev/null | head -1 | \
             xargs -I{} cp {} dist/NTE-Auto-Fish/girepository-1.0/ || true
         done
+
+    - name: Remove bundled GLib/GStreamer .so files
+      # PyInstaller copies Ubuntu 22.04's libglib/libgstreamer into the bundle.
+      # On Arch/CachyOS those older versions load first (via LD_LIBRARY_PATH),
+      # causing a version mismatch that prevents GStreamer plugins (pipewiresrc)
+      # from registering. Deleting them forces the system libs to be used instead.
+      # The gi Python extension has a stable enough ABI to work with newer GLib.
+      run: |
+        find dist/NTE-Auto-Fish -name "libglib-*.so*"        -delete
+        find dist/NTE-Auto-Fish -name "libgobject-*.so*"     -delete
+        find dist/NTE-Auto-Fish -name "libgmodule-*.so*"     -delete
+        find dist/NTE-Auto-Fish -name "libgio-*.so*"         -delete
+        find dist/NTE-Auto-Fish -name "libgstreamer-*.so*"   -delete
+        find dist/NTE-Auto-Fish -name "libgst*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libgirepository-*.so*" -delete
+        find dist/NTE-Auto-Fish -name "libffi*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libpcre*.so*"         -delete
 
     - name: Create AppDir structure
       run: |
