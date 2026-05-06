@@ -6,6 +6,8 @@ InputModule uses pynput for keyboard/mouse input (no tkinter dependency).
 import threading
 import time
 
+import os
+import sys
 import cv2
 import numpy as np
 import gi
@@ -15,6 +17,13 @@ from jeepney import DBusAddress, new_method_call, MessageType
 from jeepney.io.blocking import open_dbus_connection
 from pynput.keyboard import Controller as _KbController, Key as _Key
 from pynput.mouse import Controller as _MouseController, Button as _Button
+
+# When frozen by PyInstaller, --collect-all gi causes the gi hook to set
+# GST_PLUGIN_PATH to the (empty) bundle dir. Clear it so GStreamer falls
+# back to the system plugin directory where pipewiresrc lives.
+if getattr(sys, 'frozen', False):
+    os.environ.pop('GST_PLUGIN_PATH', None)
+    os.environ['GST_PLUGIN_SYSTEM_PATH'] = '/usr/lib/gstreamer-1.0'
 
 Gst.init(None)
 
