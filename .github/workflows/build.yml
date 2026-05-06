@@ -16,12 +16,16 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
+      options: --user root
     permissions:
       contents: write
 
     steps:
     - name: Bootstrap pacman and install git
-      run: pacman -Syu --noconfirm git
+      run: |
+        pacman-key --init
+        pacman-key --populate archlinux
+        pacman -Syu --noconfirm git
 
     - uses: actions/checkout@v4
 
