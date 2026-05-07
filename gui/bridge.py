@@ -37,6 +37,8 @@ class BotBridge:
         self._cmd_q: queue.Queue[str] = queue.Queue(maxsize=10)
         self._current_status = BotStatus()
         self._log_observers: list[queue.Queue] = []
+        self._frame_bytes: bytes = b""
+        self._frame_lock = threading.Lock()
 
     def push_status(self, status: BotStatus) -> None:
         """Push a status frame. Older frames are dropped when the GUI lags."""
@@ -94,6 +96,14 @@ class BotBridge:
     def peek_status(self) -> BotStatus:
         """Return the most recently seen status without consuming from the queue."""
         return self._current_status
+
+    def push_frame(self, jpg_bytes: bytes) -> None:
+        with self._frame_lock:
+            self._frame_bytes = jpg_bytes
+
+    def latest_frame(self) -> bytes:
+        with self._frame_lock:
+            return self._frame_bytes
 
     def drain_logs(self) -> list[str]:
         """Return all logs waiting to be rendered."""
