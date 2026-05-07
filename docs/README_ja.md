@@ -10,10 +10,10 @@ Python、OpenCV、MSS、PyDirectInput、DearPyGui で構築されています。
 
 ---
 
-[![GitHub License](https://img.shields.io/github/license/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/blob/main/LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/releases)
-[![Build Status](https://github.com/Chizukuo/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/Chizukuo/NTE-auto-fish/actions)
-[![GitHub Stars](https://img.shields.io/github/stars/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/stargazers)
+[![GitHub License](https://img.shields.io/github/license/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/releases)
+[![Build Status](https://github.com/VoidDeficit/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/VoidDeficit/NTE-auto-fish/actions)
+[![GitHub Stars](https://img.shields.io/github/stars/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/stargazers)
 
 </div>
 
@@ -42,19 +42,19 @@ Python、OpenCV、MSS、PyDirectInput、DearPyGui で構築されています。
 
 ### 方法 1：ビルド済み実行ファイル（GUI）
 
-1. [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) から最新の `NTE-Auto-Fish.exe` をダウンロードします。
+1. [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) から最新の `NTE-Auto-Fish.exe` をダウンロードします。
 2. ゲームへ入力を届けるため、管理者権限で実行します。
 
 ### 方法 2：CLI パッケージ
 
-1. [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) から `NTE-Auto-Fish-CLI.zip` をダウンロードして展開します。
+1. [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) から `NTE-Auto-Fish-CLI.zip` をダウンロードして展開します。
 2. `run.bat` をダブルクリックすると、Python の確認と初回実行時の依存パッケージ自動インストールが行われます。
 3. 詳細はターミナルで `python main.py --help` を実行してください。利用可能なコマンド：`start`、`calibrate`、`config show/set`、`reset`。
 
 ### 方法 3：ソースから実行
 
 ```bash
-git clone https://github.com/Chizukuo/NTE-auto-fish.git
+git clone https://github.com/VoidDeficit/NTE-auto-fish.git
 cd NTE-auto-fish
 pip install -r requirements.txt
 ```

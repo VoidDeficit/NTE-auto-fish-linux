@@ -12,10 +12,10 @@ Built with Python, OpenCV, MSS, PyDirectInput, and DearPyGui.
 
 ---
 
-[![GitHub License](https://img.shields.io/github/license/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/blob/main/LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/releases)
-[![Build Status](https://github.com/Chizukuo/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/Chizukuo/NTE-auto-fish/actions)
-[![GitHub Stars](https://img.shields.io/github/stars/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/stargazers)
+[![GitHub License](https://img.shields.io/github/license/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/releases)
+[![Build Status](https://github.com/VoidDeficit/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/VoidDeficit/NTE-auto-fish/actions)
+[![GitHub Stars](https://img.shields.io/github/stars/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/stargazers)
 
 </div>
 
@@ -45,19 +45,19 @@ Built with Python, OpenCV, MSS, PyDirectInput, and DearPyGui.
 
 ### Option 1: Prebuilt Executable (GUI)
 
-1. Download the latest `NTE-Auto-Fish.exe` from [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases).
+1. Download the latest `NTE-Auto-Fish.exe` from [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases).
 2. Run it as Administrator so simulated input can reach the game.
 
 ### Option 2: CLI Package
 
-1. Download `NTE-Auto-Fish-CLI.zip` from [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) and extract it.
+1. Download `NTE-Auto-Fish-CLI.zip` from [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) and extract it.
 2. Double-click `run.bat` — it checks for Python, then auto-installs missing dependencies on first run.
 3. For more options, run `python main.py --help` in a terminal. Available commands: `start`, `calibrate`, `config show/set`, `reset`.
 
 ### Option 3: Run From Source
 
 ```bash
-git clone https://github.com/Chizukuo/NTE-auto-fish.git
+git clone https://github.com/VoidDeficit/NTE-auto-fish.git
 cd NTE-auto-fish
 pip install -r requirements.txt
 ```
@@ -85,6 +85,12 @@ python main.py
 ## Known Issues
 
 - **Dawn/dusk lighting**: During in-game sunrise and sunset, the warm yellow ambient lighting significantly interferes with HSV-based cursor detection, causing tracking failures and drastically reduced fishing success rates. This is an inherent limitation of the current color-based detection approach. If you encounter this, consider adjusting the cursor HSV thresholds in Settings to compensate for the shifted lighting conditions.
+
+---
+
+## Credits
+
+This project is a fork of [NTE-auto-fish](https://github.com/Chizukuo/NTE-auto-fish) by [Chizukuo](https://github.com/Chizukuo), which provided the original Windows bot logic, PID tracking, and GUI. This fork adds Linux/Wayland/CachyOS support.
 
 ---
 

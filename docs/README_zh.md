@@ -10,10 +10,10 @@
 
 ---
 
-[![GitHub License](https://img.shields.io/github/license/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/blob/main/LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/releases)
-[![Build Status](https://github.com/Chizukuo/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/Chizukuo/NTE-auto-fish/actions)
-[![GitHub Stars](https://img.shields.io/github/stars/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/stargazers)
+[![GitHub License](https://img.shields.io/github/license/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/releases)
+[![Build Status](https://github.com/VoidDeficit/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/VoidDeficit/NTE-auto-fish/actions)
+[![GitHub Stars](https://img.shields.io/github/stars/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/stargazers)
 
 </div>
 
@@ -42,19 +42,19 @@
 
 ### 方式一：使用预构建程序（GUI）
 
-1. 从 [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) 下载最新的 `NTE-Auto-Fish.exe`。
+1. 从 [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) 下载最新的 `NTE-Auto-Fish.exe`。
 2. 以管理员身份运行，确保模拟输入可以进入游戏。
 
 ### 方式二：CLI 包
 
-1. 从 [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) 下载 `NTE-Auto-Fish-CLI.zip` 并解压。
+1. 从 [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) 下载 `NTE-Auto-Fish-CLI.zip` 并解压。
 2. 双击 `run.bat`，程序会自动检测 Python 并在首次运行时安装缺失的依赖。
 3. 更多用法请在终端运行 `python main.py --help`。可用命令：`start`、`calibrate`、`config show/set`、`reset`。
 
 ### 方式三：从源码运行
 
 ```bash
-git clone https://github.com/Chizukuo/NTE-auto-fish.git
+git clone https://github.com/VoidDeficit/NTE-auto-fish.git
 cd NTE-auto-fish
 pip install -r requirements.txt
 ```
