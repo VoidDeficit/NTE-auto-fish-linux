@@ -24,7 +24,7 @@ class HsvConfig:
         default_factory=lambda: HsvRange((75, 190, 190), (100, 255, 255))
     )
     cursor: HsvRange = field(
-        default_factory=lambda: HsvRange((15, 50, 190), (42, 255, 255))
+        default_factory=lambda: HsvRange((18, 115, 240), (40, 150, 255))
     )
 
 
