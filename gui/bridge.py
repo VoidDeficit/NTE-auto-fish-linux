@@ -1,6 +1,7 @@
 """Thread-safe bridge between the bot worker and the DearPyGui UI."""
 import dataclasses
 import queue
+import threading
 import time
 from typing import Optional, Tuple
 
