@@ -10,10 +10,10 @@ Python、OpenCV、MSS、PyDirectInput、DearPyGui で構築されています。
 
 ---
 
-[![GitHub License](https://img.shields.io/github/license/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/blob/main/LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/releases)
-[![Build Status](https://github.com/Chizukuo/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/Chizukuo/NTE-auto-fish/actions)
-[![GitHub Stars](https://img.shields.io/github/stars/Chizukuo/NTE-auto-fish)](https://github.com/Chizukuo/NTE-auto-fish/stargazers)
+[![GitHub License](https://img.shields.io/github/license/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/releases)
+[![Build Status](https://github.com/VoidDeficit/NTE-auto-fish/actions/workflows/build.yml/badge.svg)](https://github.com/VoidDeficit/NTE-auto-fish/actions)
+[![GitHub Stars](https://img.shields.io/github/stars/VoidDeficit/NTE-auto-fish)](https://github.com/VoidDeficit/NTE-auto-fish/stargazers)
 
 </div>
 
@@ -42,19 +42,19 @@ Python、OpenCV、MSS、PyDirectInput、DearPyGui で構築されています。
 
 ### 方法 1：ビルド済み実行ファイル（GUI）
 
-1. [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) から最新の `NTE-Auto-Fish.exe` をダウンロードします。
+1. [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) から最新の `NTE-Auto-Fish.exe` をダウンロードします。
 2. ゲームへ入力を届けるため、管理者権限で実行します。
 
 ### 方法 2：CLI パッケージ
 
-1. [Releases](https://github.com/Chizukuo/NTE-auto-fish/releases) から `NTE-Auto-Fish-CLI.zip` をダウンロードして展開します。
+1. [Releases](https://github.com/VoidDeficit/NTE-auto-fish/releases) から `NTE-Auto-Fish-CLI.zip` をダウンロードして展開します。
 2. `run.bat` をダブルクリックすると、Python の確認と初回実行時の依存パッケージ自動インストールが行われます。
 3. 詳細はターミナルで `python main.py --help` を実行してください。利用可能なコマンド：`start`、`calibrate`、`config show/set`、`reset`。
 
 ### 方法 3：ソースから実行
 
 ```bash
-git clone https://github.com/Chizukuo/NTE-auto-fish.git
+git clone https://github.com/VoidDeficit/NTE-auto-fish.git
 cd NTE-auto-fish
 pip install -r requirements.txt
 ```
@@ -81,3 +81,9 @@ python main.py
 ## 既知の問題
 
 - **夕暮れ・日の出時の照明干渉**：ゲーム内の日の出・日没時の暖色系の環境光が HSV ベースのカーソル検出に深刻な干渉を与え、追跡失敗や釣り成功率の大幅な低下を引き起こします。これは現在の色ベース検出方式の inherent な限界です。这种情况に遭遇した場合、設定でカーソルの HSV 閾値を調整して照明条件の変化に対応してください。
+
+---
+
+## クレジット
+
+本プロジェクトは [Chizukuo](https://github.com/Chizukuo) による [NTE-auto-fish](https://github.com/Chizukuo/NTE-auto-fish) のフォークです。元の釣りロジック・PID 制御・GUI デザインはすべて同氏の成果です。
