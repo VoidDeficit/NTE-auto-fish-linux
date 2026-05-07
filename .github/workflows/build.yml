@@ -108,6 +108,13 @@ jobs:
   # with Arch-based targets (CachyOS, Manjaro, etc.) without version mismatches.
   build-linux:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'push' && (
+        github.ref == 'refs/heads/linux-wayland-support' ||
+        contains(github.ref, '-linux.')
+      ))
     container:
       image: archlinux:base-devel
       options: --user root
