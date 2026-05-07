@@ -1,130 +1,140 @@
 """
-Screen capture and input helpers.
-CaptureModule uses XDG Desktop Portal + PipeWire + GStreamer for fast Wayland capture.
-InputModule uses pynput for keyboard/mouse input (no tkinter dependency).
+Screen capture and input helpers — backend selected automatically by platform.
+  Windows : MSS capture  +  PyDirectInput
+  Linux   : XDG Desktop Portal + PipeWire + GStreamer  +  pynput
 """
+import os
+import sys
 import threading
 import time
 
-import os
-import sys
 import cv2
 import numpy as np
-import gi
-gi.require_version('Gst', '1.0')
-from gi.repository import Gst
-from jeepney import DBusAddress, new_method_call, MessageType
-from jeepney.io.blocking import open_dbus_connection
-from pynput.keyboard import Controller as _KbController, Key as _Key
-from pynput.mouse import Controller as _MouseController, Button as _Button
 
-# When frozen by PyInstaller, --collect-all gi causes the gi hook to set
-# GST_PLUGIN_PATH to the (empty) bundle dir. Clear it so GStreamer falls
-# back to the system plugin directory where pipewiresrc lives.
-if getattr(sys, 'frozen', False):
-    os.environ.pop('GST_PLUGIN_PATH', None)
-    os.environ['GST_PLUGIN_SYSTEM_PATH'] = '/usr/lib/gstreamer-1.0'
+_WINDOWS = sys.platform == 'win32'
 
-Gst.init(None)
+# ── Windows-only imports ─────────────────────────────────────────────────────
+if _WINDOWS:
+    import mss as _mss
+    import pydirectinput as _pdi
 
-# Map pyautogui-style string names to pynput Key objects
-_KEY_MAP: dict[str, _Key] = {
-    'left': _Key.left, 'right': _Key.right,
-    'up': _Key.up, 'down': _Key.down,
-    'space': _Key.space, 'enter': _Key.enter,
-    'esc': _Key.esc, 'escape': _Key.esc,
-    'tab': _Key.tab, 'backspace': _Key.backspace,
-    'shift': _Key.shift, 'ctrl': _Key.ctrl, 'alt': _Key.alt,
-    'f1': _Key.f1, 'f2': _Key.f2, 'f3': _Key.f3, 'f4': _Key.f4,
-    'f5': _Key.f5, 'f6': _Key.f6, 'f7': _Key.f7, 'f8': _Key.f8,
-    'f9': _Key.f9, 'f10': _Key.f10, 'f11': _Key.f11, 'f12': _Key.f12,
-}
+# ── Linux-only imports ───────────────────────────────────────────────────────
+else:
+    import gi
+    gi.require_version('Gst', '1.0')
+    from gi.repository import Gst
+    from jeepney import DBusAddress, new_method_call, MessageType
+    from jeepney.io.blocking import open_dbus_connection
+    from pynput.keyboard import Controller as _KbController, Key as _Key
+    from pynput.mouse import Controller as _MouseController, Button as _Button
 
-def _resolve(key: str):
-    return _KEY_MAP.get(key.lower(), key)
+    # When frozen by PyInstaller, --collect-all gi causes the gi hook to set
+    # GST_PLUGIN_PATH to the (empty) bundle dir. Clear it so GStreamer falls
+    # back to the system plugin directory where pipewiresrc lives.
+    if getattr(sys, 'frozen', False):
+        os.environ.pop('GST_PLUGIN_PATH', None)
+        os.environ['GST_PLUGIN_SYSTEM_PATH'] = '/usr/lib/gstreamer-1.0'
 
-# Create dbus connection at module level — same as working portal_full.py
-_conn = open_dbus_connection(bus='SESSION')
-_PORTAL = DBusAddress(
-    '/org/freedesktop/portal/desktop',
-    bus_name='org.freedesktop.portal.Desktop',
-    interface='org.freedesktop.portal.ScreenCast'
-)
+    Gst.init(None)
 
-def _call(method, body, signature):
-    msg = new_method_call(_PORTAL, method, signature, body)
-    return _conn.send_and_get_reply(msg)
+    # Map pyautogui-style string names to pynput Key objects
+    _KEY_MAP: dict[str, _Key] = {
+        'left': _Key.left, 'right': _Key.right,
+        'up': _Key.up, 'down': _Key.down,
+        'space': _Key.space, 'enter': _Key.enter,
+        'esc': _Key.esc, 'escape': _Key.esc,
+        'tab': _Key.tab, 'backspace': _Key.backspace,
+        'shift': _Key.shift, 'ctrl': _Key.ctrl, 'alt': _Key.alt,
+        'f1': _Key.f1, 'f2': _Key.f2, 'f3': _Key.f3, 'f4': _Key.f4,
+        'f5': _Key.f5, 'f6': _Key.f6, 'f7': _Key.f7, 'f8': _Key.f8,
+        'f9': _Key.f9, 'f10': _Key.f10, 'f11': _Key.f11, 'f12': _Key.f12,
+    }
 
-def _wait_for_response(handle):
-    while True:
-        msg = _conn.receive()
-        if (msg.header.message_type == MessageType.signal and
-                msg.header.fields.get(1) == handle):
-            return msg.body
+    def _resolve(key: str):
+        return _KEY_MAP.get(key.lower(), key)
 
+    _conn = open_dbus_connection(bus='SESSION')
+    _PORTAL = DBusAddress(
+        '/org/freedesktop/portal/desktop',
+        bus_name='org.freedesktop.portal.Desktop',
+        interface='org.freedesktop.portal.ScreenCast'
+    )
 
-def open_portal_stream() -> int:
-    """
-    XDG ScreenCast portal handshake using module-level dbus connection.
-    Shows monitor picker popup. Returns PipeWire node_id.
-    """
-    # Step 1: CreateSession
-    print("[Portal] Creating session...")
-    reply = _call('CreateSession', (
-        {'handle_token': ('s', 'tok1'), 'session_handle_token': ('s', 'sess1')},
-    ), 'a{sv}')
-    handle = reply.body[0]
-    response = _wait_for_response(handle)
-    session = response[1]['session_handle'][1]
-    print(f"[Portal] Session: {session}")
+    def _call(method, body, signature):
+        msg = new_method_call(_PORTAL, method, signature, body)
+        return _conn.send_and_get_reply(msg)
 
-    # Step 2: SelectSources — popup appears here
-    print("[Portal] Select your monitor in the popup...")
-    reply = _call('SelectSources', (
-        session,
-        {
-            'handle_token': ('s', 'tok2'),
-            'types': ('u', 1),
-            'multiple': ('b', False),
-            'cursor_mode': ('u', 2),
-        }
-    ), 'oa{sv}')
-    handle = reply.body[0]
-    _wait_for_response(handle)
-    print("[Portal] Sources selected!")
+    def _wait_for_response(handle):
+        while True:
+            msg = _conn.receive()
+            if (msg.header.message_type == MessageType.signal and
+                    msg.header.fields.get(1) == handle):
+                return msg.body
 
-    # Step 3: Start
-    print("[Portal] Starting stream...")
-    reply = _call('Start', (
-        session, '',
-        {'handle_token': ('s', 'tok3')},
-    ), 'osa{sv}')
-    handle = reply.body[0]
-    response = _wait_for_response(handle)
-    streams = response[1].get('streams', ('a(ua{sv})', []))[1]
-    if not streams:
-        raise RuntimeError("No streams returned from portal")
-    node_id = streams[0][0]
-    print(f"[Portal] PipeWire node ID: {node_id}")
-    return node_id
+    def open_portal_stream() -> int:
+        """XDG ScreenCast portal handshake. Shows monitor picker. Returns PipeWire node_id."""
+        print("[Portal] Creating session...")
+        reply = _call('CreateSession', (
+            {'handle_token': ('s', 'tok1'), 'session_handle_token': ('s', 'sess1')},
+        ), 'a{sv}')
+        handle = reply.body[0]
+        response = _wait_for_response(handle)
+        session = response[1]['session_handle'][1]
+        print(f"[Portal] Session: {session}")
+
+        print("[Portal] Select your monitor in the popup...")
+        reply = _call('SelectSources', (
+            session,
+            {
+                'handle_token': ('s', 'tok2'),
+                'types': ('u', 1),
+                'multiple': ('b', False),
+                'cursor_mode': ('u', 2),
+            }
+        ), 'oa{sv}')
+        handle = reply.body[0]
+        _wait_for_response(handle)
+        print("[Portal] Sources selected!")
+
+        print("[Portal] Starting stream...")
+        reply = _call('Start', (
+            session, '',
+            {'handle_token': ('s', 'tok3')},
+        ), 'osa{sv}')
+        handle = reply.body[0]
+        response = _wait_for_response(handle)
+        streams = response[1].get('streams', ('a(ua{sv})', []))[1]
+        if not streams:
+            raise RuntimeError("No streams returned from portal")
+        node_id = streams[0][0]
+        print(f"[Portal] PipeWire node ID: {node_id}")
+        return node_id
 
 
 class CaptureModule:
     """
-    Fast screen capture via PipeWire XDG portal + GStreamer.
-    Background thread keeps latest frame ready — grab_bgr() is near-zero cost.
+    Screen capture — MSS on Windows, PipeWire/GStreamer on Linux.
+    Same public interface on both platforms.
     """
 
     def __init__(self, node_id: int | None = None) -> None:
-        self._pipeline = None
-        self._sink = None
-        self._width = 0
-        self._height = 0
-        self._lock = threading.Lock()
-        self._latest_frame: np.ndarray | None = None
-        self._running = False
-        self._node_id = node_id
-        self._init_pipeline()
+        if _WINDOWS:
+            self._sct = _mss.mss()
+            mon = self._sct.monitors[1]
+            self._width = mon['width']
+            self._height = mon['height']
+        else:
+            self._pipeline = None
+            self._sink = None
+            self._width = 0
+            self._height = 0
+            self._lock = threading.Lock()
+            self._latest_frame: np.ndarray | None = None
+            self._running = False
+            self._node_id = node_id
+            self._init_pipeline()
+
+    # ── Linux pipeline ───────────────────────────────────────────────────────
 
     def _init_pipeline(self) -> None:
         if self._node_id is None:
@@ -142,7 +152,6 @@ class CaptureModule:
         self._sink = self._pipeline.get_by_name('sink')
         self._pipeline.set_state(Gst.State.PLAYING)
 
-        # Match portal_full.py: wait 2s then pull
         time.sleep(2)
         sample = self._sink.emit('pull-sample')
         if sample:
@@ -198,44 +207,62 @@ class CaptureModule:
                 raise RuntimeError("No frame available yet")
             return self._latest_frame.copy()
 
+    # ── Public interface (both platforms) ────────────────────────────────────
+
     def grab_bgr(self, roi: dict) -> np.ndarray:
-        frame = self._get_frame()
-        t = roi["top"]
-        l = roi["left"]
-        h = roi["height"]
-        w = roi["width"]
-        return np.ascontiguousarray(frame[t:t+h, l:l+w])
+        if _WINDOWS:
+            region = {k: roi[k] for k in ('top', 'left', 'width', 'height')}
+            img = np.array(self._sct.grab(region))
+            return np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
+        else:
+            frame = self._get_frame()
+            t, l, h, w = roi['top'], roi['left'], roi['height'], roi['width']
+            return np.ascontiguousarray(frame[t:t+h, l:l+w])
 
     def grab_full_screen(self) -> np.ndarray:
-        return self._get_frame()
+        if _WINDOWS:
+            mon = self._sct.monitors[1]
+            img = np.array(self._sct.grab(mon))
+            return np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
+        else:
+            return self._get_frame()
 
     def get_screen_size(self) -> tuple[int, int]:
         return self._width, self._height
 
     def close(self) -> None:
-        self._running = False
-        if self._pipeline:
-            self._pipeline.set_state(Gst.State.NULL)
-            self._pipeline = None
+        if _WINDOWS:
+            self._sct.close()
+        else:
+            self._running = False
+            if self._pipeline:
+                self._pipeline.set_state(Gst.State.NULL)
+                self._pipeline = None
 
 
 class InputModule:
     """
-    pynput-based input wrapper that tracks held keys.
-    Thread-safe.
+    Input module — PyDirectInput on Windows, pynput on Linux.
+    Same public interface on both platforms. Thread-safe key tracking.
     """
 
     def __init__(self) -> None:
         self._held: set[str] = set()
         self._lock = threading.Lock()
-        self._kb = _KbController()
-        self._mouse = _MouseController()
+        if not _WINDOWS:
+            self._kb = _KbController()
+            self._mouse = _MouseController()
 
     def press(self, key: str, duration: float = 0.05) -> None:
-        k = _resolve(key)
-        self._kb.press(k)
-        time.sleep(duration)
-        self._kb.release(k)
+        if _WINDOWS:
+            _pdi.keyDown(key)
+            time.sleep(duration)
+            _pdi.keyUp(key)
+        else:
+            k = _resolve(key)
+            self._kb.press(k)
+            time.sleep(duration)
+            self._kb.release(k)
 
     def hold(self, key: str) -> None:
         with self._lock:
@@ -243,7 +270,10 @@ class InputModule:
                 return
             self._held.add(key)
         try:
-            self._kb.press(_resolve(key))
+            if _WINDOWS:
+                _pdi.keyDown(key)
+            else:
+                self._kb.press(_resolve(key))
         except Exception:
             with self._lock:
                 self._held.discard(key)
@@ -254,7 +284,10 @@ class InputModule:
             if key not in self._held:
                 return
             self._held.discard(key)
-        self._kb.release(_resolve(key))
+        if _WINDOWS:
+            _pdi.keyUp(key)
+        else:
+            self._kb.release(_resolve(key))
 
     def release_all(self) -> None:
         with self._lock:
@@ -262,10 +295,16 @@ class InputModule:
             self._held.clear()
         for key in keys:
             try:
-                self._kb.release(_resolve(key))
+                if _WINDOWS:
+                    _pdi.keyUp(key)
+                else:
+                    self._kb.release(_resolve(key))
             except Exception:
                 pass
 
     def click(self, x: int, y: int) -> None:
-        self._mouse.position = (x, y)
-        self._mouse.click(_Button.left)
+        if _WINDOWS:
+            _pdi.click(x, y)
+        else:
+            self._mouse.position = (x, y)
+            self._mouse.click(_Button.left)
