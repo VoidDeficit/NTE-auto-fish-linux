@@ -29,13 +29,18 @@ APP_TITLE = "NTE Auto-Fish"
 
 
 class FishingGUI:
-    def __init__(self):
+    def __init__(self, web_port: int | None = None):
         self._enable_hidpi()
         self.bridge = BotBridge()
         self.bot = NTEFishingBot(bridge=self.bridge)
         self.bot_thread: threading.Thread | None = None
         self._bot_lock = threading.Lock()
         self._hotkey_handles: list = []
+
+        self._web_server = None
+        if web_port is not None:
+            from modules.web_server import WebServer
+            self._web_server = WebServer(bridge=self.bridge, port=web_port)
 
         self._setup_dpg()
         self._setup_hotkeys()
@@ -275,6 +280,11 @@ class FishingGUI:
 
     def run(self):
         try:
+            if self._web_server:
+                self._web_server.start()
+                self.bridge.push_log(
+                    f"Web dashboard started → http://localhost:{self._web_server._port}"
+                )
             dpg.show_viewport()
             self._position_viewport_away_from_roi()
             self._start_bot()
