@@ -686,8 +686,18 @@ def _set_dpi_awareness() -> None:
 # CLI command handlers
 # ---------------------------------------------------------------------------
 
-def _cmd_start(_args: argparse.Namespace) -> None:
-    bot = NTEFishingBot()
+def _cmd_start(args: argparse.Namespace) -> None:
+    bridge = None
+    if getattr(args, "web", False):
+        from gui.bridge import BotBridge
+        from modules.web_server import WebServer
+        bridge = BotBridge()
+        port = getattr(args, "web_port", 5000)
+        web = WebServer(bridge=bridge, port=port)
+        web.start()
+        bridge.push_log(f"Web dashboard started → http://localhost:{port}")
+        print(f"Web dashboard: http://localhost:{port}")
+    bot = NTEFishingBot(bridge=bridge)
     bot.calibrate()
     bot.run()
 
@@ -902,7 +912,15 @@ if __name__ == "__main__":
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("start", help="Run the fishing bot")
+    start_parser = sub.add_parser("start", help="Run the fishing bot")
+    start_parser.add_argument(
+        "--web", action="store_true",
+        help="enable experimental web dashboard (requires flask)",
+    )
+    start_parser.add_argument(
+        "--web-port", type=int, default=5000, dest="web_port", metavar="PORT",
+        help="web dashboard port (default: 5000)",
+    )
     sub.add_parser("calibrate", help="Calibrate and show ROI results")
     sub.add_parser("reset", help="Reset settings.json to defaults")
 

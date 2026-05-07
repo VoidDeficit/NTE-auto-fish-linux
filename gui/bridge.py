@@ -40,6 +40,7 @@ class BotBridge:
 
     def push_status(self, status: BotStatus) -> None:
         """Push a status frame. Older frames are dropped when the GUI lags."""
+        self._current_status = status  # always live; GUI queue is bonus for smooth rendering
         if self._status_q.full():
             try:
                 self._status_q.get_nowait()
