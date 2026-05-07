@@ -90,7 +90,7 @@ python main.py
 
 ## Credits
 
-This project is a fork of [NTE-auto-fish](https://github.com/Chizukuo/NTE-auto-fish) by [Chizukuo](https://github.com/Chizukuo). All original bot logic, PID tracking, and GUI design are their work.
+This project is a fork of [NTE-auto-fish](https://github.com/Chizukuo/NTE-auto-fish) by [Chizukuo](https://github.com/Chizukuo), which provided the original Windows bot logic, PID tracking, and GUI. This fork adds Linux/Wayland/CachyOS support.
 
 ---
 
