@@ -532,7 +532,7 @@ es.onmessage = (e) => {
   document.getElementById('t-rroi').textContent  = d.bar_roi    ?? 'N/A';
 
   // Feed label
-  const feedLbl = { WAITING:'Button ROI', STRUGGLING:'Bar ROI • tracking', RESULT:'Bar ROI' };
+  const feedLbl = { IDLE:'idle', WAITING:'waiting for bite', STRUGGLING:'tracking', RESULT:'result' };
   document.getElementById('feed-label').textContent = feedLbl[d.state] ?? '';
 
   setBadge(d.is_running, d.is_stopped);

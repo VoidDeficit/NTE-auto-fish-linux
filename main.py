@@ -175,25 +175,19 @@ class NTEFishingBot:
             )
         )
 
-    def _push_frame(self, img, cursor_x=None, target_x=None) -> None:
+    def _push_web_frame(self) -> None:
         if not self.bridge:
             return
-        interval = 0.12 if cursor_x is not None or target_x is not None else 0.4
         t = time.time()
-        if t - self._last_frame_t < interval:
+        if t - self._last_frame_t < 0.5:
             return
         self._last_frame_t = t
         try:
-            frame = img.copy()
+            frame = self.capture.grab_full_screen()
             h, w = frame.shape[:2]
-            if target_x is not None:
-                sw = max(8, w // 16)
-                cv2.rectangle(frame, (max(0, target_x - sw), 0),
-                              (min(w - 1, target_x + sw), h - 1), (0, 210, 80), 1)
-            if cursor_x is not None:
-                cv2.rectangle(frame, (max(0, cursor_x - 5), 0),
-                              (min(w - 1, cursor_x + 5), h - 1), (0, 160, 255), 2)
-            _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if w > 1280:
+                frame = cv2.resize(frame, (1280, int(h * 1280 / w)))
+            _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
             self.bridge.push_frame(jpg.tobytes())
         except Exception:
             pass
@@ -355,6 +349,7 @@ class NTEFishingBot:
 
                 self._poll_commands()
                 self._push_status()
+                self._push_web_frame()
 
                 if self._is_paused:
                     self._stop_event.wait(timeout=0.1)
@@ -466,7 +461,6 @@ class NTEFishingBot:
             return
 
         btn_img = self.capture.grab_bgr(self._roi_button)
-        self._push_frame(btn_img)
         if self.vision.check_blue_trigger(
             btn_img,
             self.cfg.hsv.blue,
@@ -507,7 +501,6 @@ class NTEFishingBot:
 
         self._cursor_x_rel = cursor_x
         self._target_x_rel = target_x
-        self._push_frame(bar_img, cursor_x, target_x)
 
         output = 0.0
         action = "NONE"
@@ -680,19 +673,60 @@ def _set_dpi_awareness() -> None:
 # ---------------------------------------------------------------------------
 
 def _cmd_start(args: argparse.Namespace) -> None:
-    bridge = None
-    if getattr(args, "web", False):
-        from gui.bridge import BotBridge
-        from modules.web_server import WebServer
-        bridge = BotBridge()
-        port = getattr(args, "web_port", 5000)
-        web = WebServer(bridge=bridge, port=port)
-        web.start()
-        bridge.push_log(f"Web dashboard started → http://localhost:{port}")
-        print(f"Web dashboard: http://localhost:{port}")
-    bot = NTEFishingBot(bridge=bridge)
-    bot.calibrate()
-    bot.run()
+    if not getattr(args, "web", False):
+        bot = NTEFishingBot()
+        bot.calibrate()
+        bot.run()
+        return
+
+    from gui.bridge import BotBridge
+    from modules.web_server import WebServer
+
+    bridge = BotBridge()
+    port = getattr(args, "web_port", 5000)
+
+    bot_ref: list[NTEFishingBot] = []
+    bot_thread_ref: list[threading.Thread] = []
+    bot_lock = threading.Lock()
+
+    def on_start():
+        with bot_lock:
+            alive = bool(bot_thread_ref and bot_thread_ref[0].is_alive())
+            if alive:
+                bridge.send_cmd("resume")
+                return
+            bot = NTEFishingBot(bridge=bridge)
+            bot.prepare_for_run(paused=False)
+            bot.publish_status()
+
+            def run_bot():
+                try:
+                    bot.calibrate()
+                    bot.run()
+                except Exception as exc:
+                    bridge.push_log(f"Bot crashed: {exc}")
+
+            t = threading.Thread(target=run_bot, daemon=True)
+            if bot_ref:
+                bot_ref[0] = bot
+                bot_thread_ref[0] = t
+            else:
+                bot_ref.append(bot)
+                bot_thread_ref.append(t)
+            t.start()
+
+    web = WebServer(bridge=bridge, port=port, on_start=on_start,
+                    on_stop=lambda: bridge.send_cmd("stop"))
+    web.start()
+    bridge.push_log(f"Web dashboard: http://localhost:{port}")
+    print(f"Web dashboard → http://localhost:{port}")
+    print("Open the dashboard and press Start.  Ctrl+C to quit.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        bridge.send_cmd("stop")
+        print("\nStopped.")
 
 
 def _cmd_calibrate(_args: argparse.Namespace) -> None:
