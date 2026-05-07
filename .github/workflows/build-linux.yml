@@ -1,0 +1,146 @@
+name: Build Executable
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  # ── Linux (Wayland / KDE / CachyOS) ───────────────────────────────────────
+  # Built inside an Arch Linux container so bundled libraries are ABI-compatible
+  # with Arch-based targets (CachyOS, Manjaro, etc.) without version mismatches.
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+      options: --user root
+    permissions:
+      contents: write
+
+    steps:
+    - name: Bootstrap pacman and install git
+      run: |
+        pacman-key --init
+        pacman-key --populate archlinux
+        pacman -Syu --noconfirm git
+
+    - uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        pacman -S --noconfirm \
+          python python-pip python-gobject \
+          gobject-introspection \
+          gstreamer gst-plugins-base gst-plugins-good \
+          pipewire gst-plugin-pipewire \
+          libxtst xdotool \
+          fuse2 wget imagemagick
+
+    - name: Create venv (inherits system python-gobject)
+      run: python -m venv --system-site-packages /opt/venv
+
+    - name: Install Python dependencies
+      run: |
+        /opt/venv/bin/pip install \
+          opencv-python-headless numpy dearpygui pynput jeepney keyboard pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        /opt/venv/bin/pyinstaller --noconfirm --onedir \
+          --collect-all gi \
+          --collect-all dearpygui \
+          --hidden-import jeepney \
+          --hidden-import jeepney.io.blocking \
+          --hidden-import pynput.keyboard._xorg \
+          --hidden-import pynput.mouse._xorg \
+          --add-data "templates:templates" \
+          --add-data "gui:gui" \
+          --add-data "modules:modules" \
+          --exclude-module tkinter \
+          --exclude-module test \
+          --exclude-module unittest \
+          --name NTE-Auto-Fish \
+          start_gui.py
+
+    - name: Bundle GStreamer typelibs
+      run: |
+        mkdir -p dist/NTE-Auto-Fish/girepository-1.0
+        for typelib in Gst-1.0 GstBase-1.0 GstPbutils-1.0 GstApp-1.0 \
+                       GLib-2.0 GObject-2.0 GModule-2.0 Gio-2.0; do
+          find /usr/lib -name "${typelib}.typelib" 2>/dev/null | head -1 | \
+            xargs -I{} cp {} dist/NTE-Auto-Fish/girepository-1.0/ || true
+        done
+
+    - name: Remove bundled GLib/GIO/GStreamer/system .so files
+      # Keep only pure Python .so extensions; let the system provide all GLib
+      # ecosystem libs so GStreamer plugin loading (pipewiresrc) works correctly.
+      run: |
+        find dist/NTE-Auto-Fish -name "libglib-*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libgobject-*.so*"       -delete
+        find dist/NTE-Auto-Fish -name "libgmodule-*.so*"       -delete
+        find dist/NTE-Auto-Fish -name "libgio-*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libgstreamer-*.so*"     -delete
+        find dist/NTE-Auto-Fish -name "libgst*.so*"            -delete
+        find dist/NTE-Auto-Fish -name "libgirepository-*.so*"  -delete
+        find dist/NTE-Auto-Fish -name "libffi*.so*"            -delete
+        find dist/NTE-Auto-Fish -name "libpcre*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libmount.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libblkid.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libselinux.so*"         -delete
+        find dist/NTE-Auto-Fish -name "libz.so*"               -delete
+        find dist/NTE-Auto-Fish -name "libzstd.so*"            -delete
+
+    - name: Create AppDir structure
+      run: |
+        mkdir -p AppDir/usr/bin
+        cp -r dist/NTE-Auto-Fish AppDir/usr/bin/NTE-Auto-Fish-bundle
+
+        cat > AppDir/AppRun << 'EOF'
+        #!/bin/bash
+        HERE="$(dirname "$(readlink -f "$0")")"
+        BUNDLE="$HERE/usr/bin/NTE-Auto-Fish-bundle"
+        export GI_TYPELIB_PATH="$BUNDLE/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+        exec "$BUNDLE/NTE-Auto-Fish" "$@"
+        EOF
+        chmod +x AppDir/AppRun
+
+        cat > AppDir/NTE-Auto-Fish.desktop << 'EOF'
+        [Desktop Entry]
+        Name=NTE Auto Fish
+        Exec=NTE-Auto-Fish
+        Icon=NTE-Auto-Fish
+        Type=Application
+        Categories=Game;Utility;
+        EOF
+
+        convert -size 256x256 xc:#1a1a2e -fill white \
+          -font DejaVu-Sans -pointsize 48 -gravity center \
+          -annotate 0 "NTE" AppDir/NTE-Auto-Fish.png 2>/dev/null || \
+          touch AppDir/NTE-Auto-Fish.png
+
+    - name: Download appimagetool and build AppImage
+      run: |
+        wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+        chmod +x appimagetool-x86_64.AppImage
+        ARCH=x86_64 ./appimagetool-x86_64.AppImage \
+          --appimage-extract-and-run \
+          AppDir \
+          NTE-Auto-Fish-x86_64.AppImage
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: NTE-Auto-Fish-Linux-x86_64
+        path: NTE-Auto-Fish-x86_64.AppImage
+
+    - name: Add to GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: NTE-Auto-Fish-x86_64.AppImage
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
