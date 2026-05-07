@@ -8,7 +8,7 @@
 
 Built with Python, OpenCV, MSS, PyDirectInput, and DearPyGui.
 
-> **Platform Support:** Originally Windows-only. Now also supports **Linux** on **CachyOS** (Wayland + KDE Plasma) — including native screen capture and input via portal backends.
+> **Platform Support:** Originally Windows-only. Now also supports **Linux** on **CachyOS** (Wayland + KDE Plasma).
 
 ---
 
