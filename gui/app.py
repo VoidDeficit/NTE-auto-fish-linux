@@ -292,7 +292,8 @@ class FishingGUI:
                 )
             dpg.show_viewport()
             self._position_viewport_away_from_roi()
-            self._start_bot()
+            if not self._web_server:
+                self._start_bot()
             while dpg.is_dearpygui_running():
                 update_dashboard_ui(self.bridge)
                 update_logs_ui(self.bridge)
