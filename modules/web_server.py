@@ -1,7 +1,8 @@
 """Experimental web dashboard for NTE Auto-Fish.
 
-Launch:  python start_gui.py --web [--web-port 5000]
-Then open http://localhost:5000 in any browser on the same machine.
+GUI mode:     python start_gui.py --web [--web-port 5000]
+Headless:     python main.py start --web [--web-port 5000]
+Then open:    http://localhost:5000
 
 Requires flask:  pip install flask
 """
@@ -11,7 +12,7 @@ import json
 import queue
 import threading
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from gui.bridge import BotBridge
@@ -23,17 +24,35 @@ def _fmt_roi(roi) -> Optional[str]:
     return f"{roi[0]},{roi[1]}  {roi[2]}×{roi[3]}"
 
 
-class WebServer:
-    """SSE-based live dashboard.
+_SVG_PLACEHOLDER = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="60">'
+    '<rect width="600" height="60" fill="#12122a"/>'
+    '<text x="300" y="36" text-anchor="middle" fill="#334155"'
+    ' font-family="sans-serif" font-size="13">No capture yet</text>'
+    "</svg>"
+).encode()
 
-    The server reads bot status via bridge.peek_status() (non-destructive) and
-    receives log copies through its own observer queue registered on the bridge.
-    Both run on daemon threads so they never block shutdown.
+
+class WebServer:
+    """SSE-based live dashboard with bot controls and a game-feed image.
+
+    Status is read via bridge.peek_status() (non-destructive).
+    Logs are received through a registered observer queue.
+    Frame images are received through bridge.latest_frame().
+
+    on_start / on_stop are optional callables invoked when the matching
+    control button is pressed.  In headless mode pass None for both.
     """
 
     MAX_LOGS = 300
 
-    def __init__(self, bridge: "BotBridge", port: int = 5000) -> None:
+    def __init__(
+        self,
+        bridge: "BotBridge",
+        port: int = 5000,
+        on_start: Optional[Callable[[], None]] = None,
+        on_stop: Optional[Callable[[], None]] = None,
+    ) -> None:
         try:
             import flask  # noqa: F401
         except ImportError:
@@ -44,6 +63,8 @@ class WebServer:
 
         self._bridge = bridge
         self._port = port
+        self._on_start = on_start
+        self._on_stop = on_stop
 
         self._log_q: queue.Queue[str] = queue.Queue(maxsize=500)
         bridge.register_log_observer(self._log_q)
@@ -103,6 +124,7 @@ class WebServer:
                         "bar_roi": _fmt_roi(status.bar_roi),
                         "is_running": status.is_running,
                         "is_stopped": status.is_stopped,
+                        "can_start": server._on_start is not None,
                         "logs": logs_snap,
                     }
                     yield f"data: {json.dumps(data)}\n\n"
@@ -113,6 +135,32 @@ class WebServer:
                 mimetype="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+
+        @app.route("/frame")
+        def frame():
+            data = server._bridge.latest_frame()
+            if not data:
+                return flask.Response(_SVG_PLACEHOLDER, mimetype="image/svg+xml")
+            return flask.Response(data, mimetype="image/jpeg",
+                                  headers={"Cache-Control": "no-store"})
+
+        @app.route("/cmd/<action>", methods=["POST"])
+        def cmd(action):
+            if action == "start":
+                if server._on_start:
+                    server._on_start()
+                else:
+                    flask.abort(501)
+            elif action == "stop":
+                if server._on_stop:
+                    server._on_stop()
+                else:
+                    server._bridge.send_cmd("stop")
+            elif action in ("pause", "resume"):
+                server._bridge.send_cmd(action)
+            else:
+                flask.abort(400)
+            return "", 204
 
         app.run(host="0.0.0.0", port=self._port, threaded=True, use_reloader=False)
 
@@ -140,11 +188,14 @@ _HTML = """<!DOCTYPE html>
     body { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; min-height:100vh; }
 
     .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; }
-    .label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin-bottom:4px; }
+    .label { font-size:.68rem; color:var(--muted); text-transform:uppercase;
+             letter-spacing:.07em; margin-bottom:4px; }
     .val   { font-size:1.8rem; font-weight:700; line-height:1; }
     .mono  { font-family:'JetBrains Mono',monospace; font-size:.8rem; }
 
-    .badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:.7rem; font-weight:600; }
+    /* Status badge */
+    .badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px;
+             border-radius:20px; font-size:.7rem; font-weight:600; }
     .badge-dot { width:6px; height:6px; border-radius:50%; }
     .badge-run   { background:rgba(16,185,129,.15); color:#10b981; }
     .badge-run   .badge-dot { background:#10b981; animation:blink 1.4s infinite; }
@@ -154,15 +205,28 @@ _HTML = """<!DOCTYPE html>
     .badge-stop  .badge-dot { background:#ef4444; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-    .vis-track  { height:36px; border-radius:8px; background:#12122a; position:relative; overflow:hidden; }
+    /* Control buttons */
+    .ctrl { padding:6px 16px; border:1px solid transparent; border-radius:7px;
+            font-size:.8rem; font-weight:600; cursor:pointer; transition:opacity .1s, background .1s; }
+    .ctrl:disabled { opacity:.28; cursor:default; }
+    .ctrl-green { background:rgba(16,185,129,.12); color:#10b981; border-color:rgba(16,185,129,.3); }
+    .ctrl-green:not(:disabled):hover { background:rgba(16,185,129,.22); }
+    .ctrl-amber { background:rgba(245,158,11,.12); color:#f59e0b; border-color:rgba(245,158,11,.3); }
+    .ctrl-amber:not(:disabled):hover { background:rgba(245,158,11,.22); }
+    .ctrl-red   { background:rgba(239,68,68,.12);  color:#ef4444; border-color:rgba(239,68,68,.3); }
+    .ctrl-red:not(:disabled):hover { background:rgba(239,68,68,.22); }
+
+    /* Bar visualiser */
+    .vis-track  { height:28px; border-radius:6px; background:#12122a; position:relative; overflow:hidden; }
     .vis-safe   { position:absolute; top:0; bottom:0; background:rgba(16,185,129,.2);
                   border-left:2px solid rgba(16,185,129,.5); border-right:2px solid rgba(16,185,129,.5); }
     .vis-cursor { position:absolute; top:50%; transform:translate(-50%,-50%);
-                  width:8px; height:26px; background:#f59e0b; border-radius:3px;
-                  box-shadow:0 0 10px rgba(245,158,11,.5); }
+                  width:7px; height:22px; background:#f59e0b; border-radius:2px;
+                  box-shadow:0 0 8px rgba(245,158,11,.5); }
 
-    .log-line { font-family:'JetBrains Mono',monospace; font-size:.7rem; line-height:1.65;
-                white-space:pre-wrap; word-break:break-all; }
+    /* Log colours */
+    .log-line { font-family:'JetBrains Mono',monospace; font-size:.7rem;
+                line-height:1.65; white-space:pre-wrap; word-break:break-all; }
     .lc-err  { color:#f87171; }
     .lc-warn { color:#fbbf24; }
     .lc-ok   { color:#34d399; }
@@ -177,7 +241,7 @@ _HTML = """<!DOCTYPE html>
 <div style="max-width:1120px;margin:0 auto;padding:20px 24px;">
 
   <!-- Header -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <div>
       <h1 style="font-size:1.3rem;font-weight:700;letter-spacing:-.01em;">NTE Auto-Fish</h1>
       <div style="color:var(--muted);font-size:.75rem;margin-top:2px;">Live Web Dashboard</div>
@@ -190,11 +254,26 @@ _HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Controls -->
+  <div class="card" style="padding:12px 16px;margin-bottom:16px;
+       display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <button id="btn-start"  class="ctrl ctrl-green" onclick="sendCmd('start')"
+            disabled>&#9654; Start</button>
+    <button id="btn-pause"  class="ctrl ctrl-amber" onclick="sendPauseResume()"
+            data-action="pause" disabled>&#9646;&#9646; Pause</button>
+    <button id="btn-stop"   class="ctrl ctrl-red"   onclick="sendCmd('stop')"
+            disabled>&#9632; Stop</button>
+    <div style="flex:1;"></div>
+    <span style="color:var(--muted);font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;">
+      Bot Controls
+    </span>
+  </div>
+
   <!-- Stat cards -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;">
     <div class="card">
       <div class="label">State</div>
-      <div class="val" id="c-state" style="font-size:1.2rem;">—</div>
+      <div class="val" id="c-state" style="font-size:1.15rem;">&#8212;</div>
     </div>
     <div class="card">
       <div class="label">Fish Caught</div>
@@ -210,57 +289,63 @@ _HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Bar visualiser + PID chart -->
-  <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;margin-bottom:16px;">
-    <div class="card" style="display:flex;flex-direction:column;gap:12px;">
-      <div class="label" style="margin-bottom:0;">Bar Tracker</div>
-      <div class="vis-track" id="vis-track">
-        <div class="vis-safe"   id="vis-safe"   style="display:none;"></div>
-        <div class="vis-cursor" id="vis-cursor" style="display:none;"></div>
+  <!-- Game feed + right column -->
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:14px;margin-bottom:16px;">
+
+    <!-- Game feed -->
+    <div class="card" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="label" style="margin-bottom:0;">Game Feed</div>
+        <div id="feed-label" style="color:var(--muted);font-size:.68rem;">&#8212;</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;">
-        <div><div class="label">Cursor X</div><div class="mono" id="t-curx">N/A</div></div>
-        <div><div class="label">Target X</div><div class="mono" id="t-tgtx">N/A</div></div>
+      <div style="background:#0d0d1a;border-radius:8px;overflow:hidden;
+                  display:flex;align-items:center;justify-content:center;min-height:72px;">
+        <img id="feed-img" src="/frame" alt="No capture"
+             style="width:100%;max-height:220px;object-fit:contain;display:block;"/>
+      </div>
+      <!-- Bar visualiser under feed -->
+      <div>
+        <div class="label">Bar Tracker</div>
+        <div class="vis-track" id="vis-track">
+          <div class="vis-safe"   id="vis-safe"   style="display:none;"></div>
+          <div class="vis-cursor" id="vis-cursor" style="display:none;"></div>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:8px;">
+          <div><div class="label">Cursor X</div><div class="mono" id="t-curx">N/A</div></div>
+          <div><div class="label">Target X</div><div class="mono" id="t-tgtx">N/A</div></div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <!-- PID chart -->
+    <div class="card" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
         <div class="label" style="margin-bottom:0;">PID Output</div>
         <div class="mono" style="color:var(--accent);" id="pid-val">0.000</div>
       </div>
-      <div style="height:110px;position:relative;">
+      <div style="flex:1;min-height:120px;position:relative;">
         <canvas id="pid-chart"></canvas>
       </div>
-    </div>
-  </div>
-
-  <!-- Telemetry row -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;">
-    <div class="card" style="padding:14px;">
-      <div class="label">Lost Frames</div>
-      <div style="display:flex;gap:20px;margin-top:6px;">
-        <div>
-          <div class="mono" id="t-lost">0</div>
-          <div class="label" style="margin-top:2px;font-size:.62rem;">Total</div>
-        </div>
-        <div>
-          <div class="mono" id="t-lcur">0</div>
-          <div class="label" style="margin-top:2px;font-size:.62rem;">Cursor</div>
-        </div>
-        <div>
-          <div class="mono" id="t-ltgt">0</div>
-          <div class="label" style="margin-top:2px;font-size:.62rem;">Target</div>
+      <!-- Telemetry inside right card -->
+      <div style="border-top:1px solid var(--border);padding-top:10px;">
+        <div class="label" style="margin-bottom:6px;">Lost Frames</div>
+        <div style="display:flex;gap:16px;">
+          <div><div class="mono" id="t-lost">0</div>
+               <div class="label" style="font-size:.6rem;margin-top:2px;">Total</div></div>
+          <div><div class="mono" id="t-lcur">0</div>
+               <div class="label" style="font-size:.6rem;margin-top:2px;">Cursor</div></div>
+          <div><div class="mono" id="t-ltgt">0</div>
+               <div class="label" style="font-size:.6rem;margin-top:2px;">Target</div></div>
         </div>
       </div>
-    </div>
-    <div class="card" style="padding:14px;">
-      <div class="label">Button ROI</div>
-      <div class="mono" id="t-broi" style="margin-top:6px;">N/A</div>
-    </div>
-    <div class="card" style="padding:14px;">
-      <div class="label">Bar ROI</div>
-      <div class="mono" id="t-rroi" style="margin-top:6px;">N/A</div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;">
+        <div class="label">Button ROI</div>
+        <div class="mono" id="t-broi" style="margin-top:2px;font-size:.75rem;word-break:break-all;">N/A</div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;">
+        <div class="label">Bar ROI</div>
+        <div class="mono" id="t-rroi" style="margin-top:2px;font-size:.75rem;word-break:break-all;">N/A</div>
+      </div>
     </div>
   </div>
 
@@ -275,7 +360,8 @@ _HTML = """<!DOCTYPE html>
       </button>
     </div>
     <div id="log-box"
-      style="height:220px;overflow-y:auto;background:#0d0d1a;border-radius:8px;padding:10px 12px;">
+      style="height:220px;overflow-y:auto;background:#0d0d1a;
+             border-radius:8px;padding:10px 12px;">
     </div>
   </div>
 
@@ -293,15 +379,11 @@ const pidChart = new Chart(document.getElementById('pid-chart').getContext('2d')
       borderColor: '#6c63ff',
       borderWidth: 1.5,
       backgroundColor: 'rgba(108,99,255,0.08)',
-      fill: true,
-      pointRadius: 0,
-      tension: 0.35,
+      fill: true, pointRadius: 0, tension: 0.35,
     }]
   },
   options: {
-    animation: false,
-    responsive: true,
-    maintainAspectRatio: false,
+    animation: false, responsive: true, maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
       x: { display: false },
@@ -314,22 +396,61 @@ const pidChart = new Chart(document.getElementById('pid-chart').getContext('2d')
   }
 });
 
+// Helpers
 function fmtTime(s) {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = Math.floor(s % 60);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = Math.floor(s % 60);
   return h + ':' + String(m).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
 }
+const stateMap = {
+  IDLE:'Idle', WAITING:'Waiting', STRUGGLING:'Tracking', RESULT:'Result', UNKNOWN:'—'
+};
 
-const stateMap = { IDLE:'Idle', WAITING:'Waiting', STRUGGLING:'Tracking', RESULT:'Result', UNKNOWN:'\\u2014' };
-
+// Badge
 function setBadge(running, stopped) {
-  const b = document.getElementById('badge');
-  const t = document.getElementById('badge-text');
+  const b = document.getElementById('badge'), t = document.getElementById('badge-text');
   b.className = 'badge ' + (stopped ? 'badge-stop' : running ? 'badge-run' : 'badge-pause');
   t.textContent = stopped ? 'Stopped' : running ? 'Running' : 'Paused';
 }
 
+// Controls
+let canStart = false;
+function updateControls(running, stopped) {
+  const btnStart = document.getElementById('btn-start');
+  const btnPause = document.getElementById('btn-pause');
+  const btnStop  = document.getElementById('btn-stop');
+  if (stopped) {
+    btnStart.disabled = !canStart;
+    btnPause.disabled = true;
+    btnStop.disabled  = true;
+    btnPause.innerHTML = '&#9646;&#9646; Pause';
+    btnPause.dataset.action = 'pause';
+    btnPause.className = 'ctrl ctrl-amber';
+  } else if (running) {
+    btnStart.disabled = true;
+    btnPause.disabled = false;
+    btnStop.disabled  = false;
+    btnPause.innerHTML = '&#9646;&#9646; Pause';
+    btnPause.dataset.action = 'pause';
+    btnPause.className = 'ctrl ctrl-amber';
+  } else {
+    btnStart.disabled = true;
+    btnPause.disabled = false;
+    btnStop.disabled  = false;
+    btnPause.innerHTML = '&#9654; Resume';
+    btnPause.dataset.action = 'resume';
+    btnPause.className = 'ctrl ctrl-green';
+  }
+}
+
+function sendCmd(action) {
+  fetch('/cmd/' + action, { method: 'POST' }).catch(() => {});
+}
+function sendPauseResume() {
+  const action = document.getElementById('btn-pause').dataset.action || 'pause';
+  sendCmd(action);
+}
+
+// Bar visualiser
 function updateVis(cx, tx, bw) {
   const track = document.getElementById('vis-track');
   const safe  = document.getElementById('vis-safe');
@@ -338,25 +459,35 @@ function updateVis(cx, tx, bw) {
   if (!bw || !tw) { safe.style.display = cur.style.display = 'none'; return; }
   const sc = tw / bw;
   if (tx !== null && tx !== undefined) {
-    const half = bw * 0.1 * sc;
+    const half = bw * 0.08 * sc;
     const mid  = tx * sc;
     safe.style.display = '';
     safe.style.left    = Math.max(0, mid - half) + 'px';
     safe.style.width   = (half * 2) + 'px';
-  } else {
-    safe.style.display = 'none';
-  }
+  } else { safe.style.display = 'none'; }
   if (cx !== null && cx !== undefined) {
     cur.style.display = '';
     cur.style.left    = (cx * sc) + 'px';
-  } else {
-    cur.style.display = 'none';
-  }
+  } else { cur.style.display = 'none'; }
 }
 
+// Game feed
+let feedActive = false;
+function startFeed() {
+  if (feedActive) return;
+  feedActive = true;
+  (function tick() {
+    const img = document.getElementById('feed-img');
+    const next = new Image();
+    next.onload = () => { img.src = next.src; };
+    next.src = '/frame?' + Date.now();
+    setTimeout(tick, 150);
+  })();
+}
+
+// Logs
 const logBox = document.getElementById('log-box');
 let knownCount = 0;
-
 function appendLogs(logs) {
   const fresh = logs.slice(knownCount);
   knownCount  = logs.length;
@@ -376,15 +507,13 @@ function appendLogs(logs) {
   logBox.appendChild(frag);
   if (atBot) logBox.scrollTop = logBox.scrollHeight;
 }
-
 function clearLogs() { logBox.innerHTML = ''; knownCount = 0; }
 
-// SSE stream
+// SSE
 const es   = new EventSource('/stream');
 const conn = document.getElementById('conn');
-
-es.onopen  = () => { conn.textContent = '\\u25cf Live'; conn.style.color = '#10b981'; };
-es.onerror = () => { conn.textContent = 'Reconnecting\\u2026'; conn.style.color = '#f59e0b'; };
+es.onopen  = () => { conn.textContent = '● Live'; conn.style.color = '#10b981'; startFeed(); };
+es.onerror = () => { conn.textContent = 'Reconnecting…'; conn.style.color = '#f59e0b'; };
 
 es.onmessage = (e) => {
   const d = JSON.parse(e.data);
@@ -402,13 +531,21 @@ es.onmessage = (e) => {
   document.getElementById('t-broi').textContent  = d.button_roi ?? 'N/A';
   document.getElementById('t-rroi').textContent  = d.bar_roi    ?? 'N/A';
 
+  // Feed label
+  const feedLbl = { WAITING:'Button ROI', STRUGGLING:'Bar ROI • tracking', RESULT:'Bar ROI' };
+  document.getElementById('feed-label').textContent = feedLbl[d.state] ?? '';
+
   setBadge(d.is_running, d.is_stopped);
   updateVis(d.cursor_x, d.target_x, d.bar_width);
 
-  pidBuf.shift();
-  pidBuf.push(d.pid_output);
+  // PID chart
+  pidBuf.shift(); pidBuf.push(d.pid_output);
   pidChart.data.datasets[0].data = pidBuf.slice();
   pidChart.update('none');
+
+  // Controls — set canStart once from first message
+  canStart = !!d.can_start;
+  updateControls(d.is_running, d.is_stopped);
 
   appendLogs(d.logs);
 };

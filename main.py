@@ -104,6 +104,7 @@ class NTEFishingBot:
         self._is_stopped = True
         self._fps = 0.0
         self._last_time = time.time()
+        self._last_frame_t: float = 0.0
 
         self._log("Bot initialized.")
 
@@ -175,6 +176,29 @@ class NTEFishingBot:
                 is_stopped=self._is_stopped,
             )
         )
+
+    def _push_frame(self, img, cursor_x=None, target_x=None) -> None:
+        if not self.bridge:
+            return
+        interval = 0.12 if cursor_x is not None or target_x is not None else 0.4
+        t = time.time()
+        if t - self._last_frame_t < interval:
+            return
+        self._last_frame_t = t
+        try:
+            frame = img.copy()
+            h, w = frame.shape[:2]
+            if target_x is not None:
+                sw = max(8, w // 16)
+                cv2.rectangle(frame, (max(0, target_x - sw), 0),
+                              (min(w - 1, target_x + sw), h - 1), (0, 210, 80), 1)
+            if cursor_x is not None:
+                cv2.rectangle(frame, (max(0, cursor_x - 5), 0),
+                              (min(w - 1, cursor_x + 5), h - 1), (0, 160, 255), 2)
+            _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            self.bridge.push_frame(jpg.tobytes())
+        except Exception:
+            pass
 
     @staticmethod
     def _roi_tuple(roi: dict) -> tuple[int, int, int, int]:
@@ -466,6 +490,7 @@ class NTEFishingBot:
             return
 
         btn_img = self.capture.grab_bgr(self._roi_button)
+        self._push_frame(btn_img)
         if self.vision.check_blue_trigger(
             btn_img,
             self.cfg.hsv.blue,
@@ -506,6 +531,7 @@ class NTEFishingBot:
 
         self._cursor_x_rel = cursor_x
         self._target_x_rel = target_x
+        self._push_frame(bar_img, cursor_x, target_x)
 
         output = 0.0
         action = "NONE"

@@ -40,7 +40,12 @@ class FishingGUI:
         self._web_server = None
         if web_port is not None:
             from modules.web_server import WebServer
-            self._web_server = WebServer(bridge=self.bridge, port=web_port)
+            self._web_server = WebServer(
+                bridge=self.bridge,
+                port=web_port,
+                on_start=self._start_bot,
+                on_stop=self._stop_bot,
+            )
 
         self._setup_dpg()
         self._setup_hotkeys()
