@@ -18,7 +18,7 @@ class HsvRange:
 @dataclass
 class HsvConfig:
     blue: HsvRange = field(
-        default_factory=lambda: HsvRange((100, 140, 140), (130, 255, 255))
+        default_factory=lambda: HsvRange((100, 160, 140), (130, 255, 255))
     )
     safe_zone: HsvRange = field(
         default_factory=lambda: HsvRange((75, 190, 190), (100, 255, 255))
