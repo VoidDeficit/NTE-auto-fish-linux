@@ -1,6 +1,13 @@
+# Cross-platform (both Windows and Linux)
 opencv-python-headless
 numpy
-mss
-pydirectinput
 dearpygui
 keyboard
+
+# Windows only
+mss; sys_platform == "win32"
+pydirectinput; sys_platform == "win32"
+
+# Linux only (pip-installable part — python-gobject must come from system package manager)
+pynput; sys_platform != "win32"
+jeepney; sys_platform != "win32"
