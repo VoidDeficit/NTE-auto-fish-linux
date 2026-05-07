@@ -121,6 +121,18 @@ jobs:
 
     - uses: actions/checkout@v4
 
+    - name: Read versions
+      id: ver
+      run: |
+        UPSTREAM=$(cat version.txt | tr -d '[:space:]')
+        LINUX=$(cat version-linux.txt | tr -d '[:space:]')
+        COMBINED="v${UPSTREAM}-linux.v${LINUX}"
+        echo "upstream=${UPSTREAM}"  >> $GITHUB_OUTPUT
+        echo "linux=${LINUX}"        >> $GITHUB_OUTPUT
+        echo "combined=${COMBINED}"  >> $GITHUB_OUTPUT
+        echo "appimage=NTE-Auto-Fish-${COMBINED}-x86_64.AppImage" >> $GITHUB_OUTPUT
+        echo "Combined version: ${COMBINED}"
+
     - name: Install system dependencies
       run: |
         pacman -S --noconfirm \
@@ -220,19 +232,19 @@ jobs:
         ARCH=x86_64 ./appimagetool-x86_64.AppImage \
           --appimage-extract-and-run \
           AppDir \
-          NTE-Auto-Fish-x86_64.AppImage
+          "${{ steps.ver.outputs.appimage }}"
 
     - name: Upload Linux artifact
       uses: actions/upload-artifact@v4
       with:
         name: NTE-Auto-Fish-Linux-x86_64
-        path: NTE-Auto-Fish-x86_64.AppImage
+        path: ${{ steps.ver.outputs.appimage }}
 
     - name: Upload to Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
-        files: NTE-Auto-Fish-x86_64.AppImage
+        files: ${{ steps.ver.outputs.appimage }}
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
