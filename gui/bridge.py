@@ -36,6 +36,7 @@ class BotBridge:
         self._log_q: queue.Queue[str] = queue.Queue(maxsize=500)
         self._cmd_q: queue.Queue[str] = queue.Queue(maxsize=10)
         self._current_status = BotStatus()
+        self._log_observers: list[queue.Queue] = []
 
     def push_status(self, status: BotStatus) -> None:
         """Push a status frame. Older frames are dropped when the GUI lags."""
@@ -51,15 +52,21 @@ class BotBridge:
 
     def push_log(self, msg: str) -> None:
         """Push a log message. The oldest entry is dropped if the queue is full."""
+        stamped = f"[{_fmt_time()}] {msg}"
         if self._log_q.full():
             try:
                 self._log_q.get_nowait()
             except queue.Empty:
                 pass
         try:
-            self._log_q.put_nowait(f"[{_fmt_time()}] {msg}")
+            self._log_q.put_nowait(stamped)
         except queue.Full:
             pass
+        for obs in self._log_observers:
+            try:
+                obs.put_nowait(stamped)
+            except queue.Full:
+                pass
 
     def poll_cmd(self) -> Optional[str]:
         """Return the next command for the bot thread, if any."""
@@ -67,6 +74,10 @@ class BotBridge:
             return self._cmd_q.get_nowait()
         except queue.Empty:
             return None
+
+    def register_log_observer(self, q: "queue.Queue[str]") -> None:
+        """Add a queue that receives a copy of every log message."""
+        self._log_observers.append(q)
 
     def latest_status(self) -> BotStatus:
         """Drain pending status frames and return only the newest snapshot."""
@@ -78,6 +89,10 @@ class BotBridge:
                 break
         self._current_status = latest
         return latest
+
+    def peek_status(self) -> BotStatus:
+        """Return the most recently seen status without consuming from the queue."""
+        return self._current_status
 
     def drain_logs(self) -> list[str]:
         """Return all logs waiting to be rendered."""
