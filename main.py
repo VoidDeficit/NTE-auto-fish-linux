@@ -718,7 +718,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
     bridge = BotBridge()
     port = getattr(args, "web_port", 5000)
 
-    bot_ref: list[NTEFishingBot] = []
     bot_thread_ref: list[threading.Thread] = []
     bot_lock = threading.Lock()
 
@@ -728,11 +727,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
             if alive:
                 bridge.send_cmd("resume")
                 return
-            bot = NTEFishingBot(bridge=bridge)
-            bot.prepare_for_run(paused=False)
-            bot.publish_status()
 
             def run_bot():
+                # Create bot (and mss capture) on the thread that will use it.
+                # mss/GDI device contexts are thread-affine on Windows.
+                bot = NTEFishingBot(bridge=bridge)
+                bot.prepare_for_run(paused=False)
+                bot.publish_status()
                 try:
                     bot.calibrate()
                     bot.run()
@@ -740,11 +741,9 @@ def _cmd_start(args: argparse.Namespace) -> None:
                     bridge.push_log(f"Bot crashed: {exc}")
 
             t = threading.Thread(target=run_bot, daemon=True)
-            if bot_ref:
-                bot_ref[0] = bot
+            if bot_thread_ref:
                 bot_thread_ref[0] = t
             else:
-                bot_ref.append(bot)
                 bot_thread_ref.append(t)
             t.start()
 
