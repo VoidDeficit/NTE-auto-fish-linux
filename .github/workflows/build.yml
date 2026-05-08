@@ -156,7 +156,7 @@ jobs:
     - name: Install Python dependencies
       run: |
         /opt/venv/bin/pip install \
-          opencv-python-headless numpy dearpygui pynput jeepney keyboard pyinstaller flask
+          opencv-python-headless numpy dearpygui pynput jeepney keyboard pyinstaller flask screeninfo
 
     - name: Build with PyInstaller
       run: |
@@ -171,6 +171,7 @@ jobs:
           --hidden-import pynput.mouse._xorg \
           --hidden-import flask \
           --hidden-import werkzeug \
+          --hidden-import screeninfo \
           --add-data "templates:templates" \
           --add-data "gui:gui" \
           --add-data "modules:modules" \
