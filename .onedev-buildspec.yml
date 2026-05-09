@@ -135,3 +135,111 @@ jobs:
   maxRetries: 3
   retryDelay: 30
   timeout: 3600
+
+- name: Build Windows EXE
+  jobExecutor: docker-linux
+  steps:
+  - !CheckoutStep
+    name: Checkout
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Build
+    runInContainer: false
+    interpreter: !DefaultInterpreter
+      commands: |
+        set -e
+
+        # ── Shared storage between host and dockur/windows VM ───────────────
+        STORAGE="$(pwd)/win-storage"
+        mkdir -p "$STORAGE/oem" "$STORAGE/source" "$STORAGE/output"
+
+        # ── Copy project source into Windows-accessible storage ─────────────
+        cp -r templates/ modules/ gui/ start_gui.py config.py "$STORAGE/source/"
+
+        # ── Windows build script (dockur/windows runs /storage/oem/*.cmd) ───
+        cat > "$STORAGE/oem/setupComplete.cmd" << 'WINCMD'
+        @echo off
+        setlocal EnableDelayedExpansion
+
+        powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\py.exe'"
+        C:\py.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+        timeout /t 60 /nobreak > nul
+        del C:\py.exe
+
+        set "PY=C:\Program Files\Python311\python.exe"
+        if not exist "%PY%" set "PY=C:\Python311\python.exe"
+
+        "%PY%" -m pip install --upgrade pip
+        "%PY%" -m pip install pyinstaller flask werkzeug opencv-python-headless numpy dearpygui keyboard screeninfo mss pydirectinput
+
+        xcopy /e /i /q /y "E:\source" "C:\nte\"
+        cd /d C:\nte
+        "%PY%" -m PyInstaller --noconfirm --onefile --windowed --icon=NONE "--add-data=templates;templates" "--add-data=gui;gui" "--add-data=modules;modules" "--collect-all=flask" "--collect-all=werkzeug" "--hidden-import=flask" "--hidden-import=werkzeug" "--exclude-module=tkinter" "--exclude-module=unittest" --name NTE-Auto-Fish start_gui.py
+
+        if exist "dist\NTE-Auto-Fish.exe" (
+          copy /y "dist\NTE-Auto-Fish.exe" "E:\output\NTE-Auto-Fish.exe"
+          echo SUCCESS > "E:\output\status.txt"
+        ) else (
+          echo FAILED > "E:\output\status.txt"
+        )
+        WINCMD
+
+        # ── Launch Windows VM ───────────────────────────────────────────────
+        CONTAINER="nte-win-$$"
+        docker run -d --name "$CONTAINER" --privileged --device /dev/kvm \
+          -e VERSION="tiny11" \
+          -e RAM_SIZE="4G" \
+          -e CPU_CORES="4" \
+          -v "$STORAGE:/storage" \
+          dockur/windows
+
+        echo "Windows container $CONTAINER started."
+        echo "First run: Windows installs, then the build script runs (~30-90 min)."
+
+        # ── Poll for completion ─────────────────────────────────────────────
+        TIMEOUT=5400
+        ELAPSED=0
+        while [ ! -f "$STORAGE/output/status.txt" ]; do
+          sleep 60
+          ELAPSED=$((ELAPSED + 60))
+          echo "Waiting... ${ELAPSED}s / ${TIMEOUT}s"
+          if ! docker inspect "$CONTAINER" > /dev/null 2>&1; then
+            echo "Container exited unexpectedly"; exit 1
+          fi
+          if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+            docker stop "$CONTAINER" 2>/dev/null || true
+            docker rm  "$CONTAINER" 2>/dev/null || true
+            echo "Timed out after ${TIMEOUT}s"; exit 1
+          fi
+        done
+
+        # ── Collect artifact ────────────────────────────────────────────────
+        if grep -q SUCCESS "$STORAGE/output/status.txt"; then
+          cp "$STORAGE/output/NTE-Auto-Fish.exe" ./
+          echo "Build successful!"
+        else
+          echo "Build FAILED (check Windows logs)"
+          docker stop "$CONTAINER" 2>/dev/null || true
+          docker rm  "$CONTAINER" 2>/dev/null || true
+          exit 1
+        fi
+
+        docker stop "$CONTAINER" 2>/dev/null || true
+        docker rm  "$CONTAINER" 2>/dev/null || true
+    useTTY: false
+    condition: ALWAYS
+  - !PublishArtifactStep
+    name: Publish EXE
+    artifacts: "*.exe"
+    condition: ALWAYS
+  triggers:
+  - !TagCreateTrigger
+    tags: v*
+  - !BranchUpdateTrigger
+    branches: main
+  retryCondition: never
+  maxRetries: 1
+  retryDelay: 30
+  timeout: 7200
