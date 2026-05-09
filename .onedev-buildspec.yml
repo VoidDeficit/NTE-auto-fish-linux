@@ -193,7 +193,7 @@ jobs:
           -e RAM_SIZE="4G" \
           -e CPU_CORES="4" \
           -v "$STORAGE:/storage" \
-          dockur/windows
+          ghcr.io/dockur/windows
 
         echo "Windows container $CONTAINER started."
         echo "First run: Windows installs, then the build script runs (~30-90 min)."
