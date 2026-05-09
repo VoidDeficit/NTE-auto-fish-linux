@@ -1,0 +1,164 @@
+version: 37
+jobs:
+- name: Build Linux AppImage
+  jobExecutor: docker-linux
+  steps:
+  - !CheckoutStep
+    name: Checkout
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Bootstrap pacman
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        pacman-key --init
+        pacman-key --populate archlinux
+        pacman -Syu --noconfirm
+    useTTY: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Install system dependencies
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        pacman -S --noconfirm \
+          python python-pip python-gobject \
+          gobject-introspection \
+          gstreamer gst-plugins-base gst-plugins-good \
+          pipewire gst-plugin-pipewire \
+          libxtst xdotool \
+          fuse2 wget imagemagick
+    useTTY: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Install Python dependencies
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        python -m venv --system-site-packages /opt/venv
+        /opt/venv/bin/pip install \
+          opencv-python-headless numpy dearpygui pynput jeepney \
+          keyboard pyinstaller flask screeninfo
+    useTTY: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Build with PyInstaller
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        /opt/venv/bin/pyinstaller --noconfirm --onedir \
+          --collect-all gi \
+          --collect-all dearpygui \
+          --collect-all flask \
+          --collect-all werkzeug \
+          --hidden-import jeepney \
+          --hidden-import jeepney.io.blocking \
+          --hidden-import pynput.keyboard._xorg \
+          --hidden-import pynput.mouse._xorg \
+          --hidden-import flask \
+          --hidden-import werkzeug \
+          --hidden-import screeninfo \
+          --add-data "templates:templates" \
+          --add-data "gui:gui" \
+          --add-data "modules:modules" \
+          --exclude-module tkinter \
+          --exclude-module test \
+          --exclude-module unittest \
+          --name NTE-Auto-Fish \
+          start_gui.py
+    useTTY: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Bundle typelibs and strip system libs
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        mkdir -p dist/NTE-Auto-Fish/girepository-1.0
+        for typelib in Gst-1.0 GstBase-1.0 GstPbutils-1.0 GstApp-1.0 \
+                       GLib-2.0 GObject-2.0 GModule-2.0 Gio-2.0; do
+          find /usr/lib -name "${typelib}.typelib" 2>/dev/null | head -1 | \
+            xargs -I{} cp {} dist/NTE-Auto-Fish/girepository-1.0/ || true
+        done
+
+        find dist/NTE-Auto-Fish -name "libglib-*.so*"         -delete
+        find dist/NTE-Auto-Fish -name "libgobject-*.so*"      -delete
+        find dist/NTE-Auto-Fish -name "libgmodule-*.so*"      -delete
+        find dist/NTE-Auto-Fish -name "libgio-*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libgstreamer-*.so*"    -delete
+        find dist/NTE-Auto-Fish -name "libgst*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libgirepository-*.so*" -delete
+        find dist/NTE-Auto-Fish -name "libffi*.so*"           -delete
+        find dist/NTE-Auto-Fish -name "libpcre*.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libmount.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libblkid.so*"          -delete
+        find dist/NTE-Auto-Fish -name "libselinux.so*"        -delete
+        find dist/NTE-Auto-Fish -name "libz.so*"              -delete
+        find dist/NTE-Auto-Fish -name "libzstd.so*"           -delete
+    useTTY: false
+    condition: ALWAYS
+  - !CommandStep
+    name: Package AppImage
+    runInContainer: true
+    image: archlinux:base-devel
+    interpreter: !DefaultInterpreter
+      commands: |
+        UPSTREAM=$(cat version.txt | tr -d '[:space:]')
+        LINUX=$(cat version-linux.txt | tr -d '[:space:]')
+        APPIMAGE="NTE-Auto-Fish-v${UPSTREAM}-linux.v${LINUX}-x86_64.AppImage"
+
+        mkdir -p AppDir/usr/bin
+        cp -r dist/NTE-Auto-Fish AppDir/usr/bin/NTE-Auto-Fish-bundle
+
+        cat > AppDir/AppRun << 'APPRUN'
+        #!/bin/bash
+        HERE="$(dirname "$(readlink -f "$0")")"
+        BUNDLE="$HERE/usr/bin/NTE-Auto-Fish-bundle"
+        export GI_TYPELIB_PATH="$BUNDLE/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+        exec "$BUNDLE/NTE-Auto-Fish" "$@"
+        APPRUN
+        chmod +x AppDir/AppRun
+
+        cat > AppDir/NTE-Auto-Fish.desktop << 'DESKTOP'
+        [Desktop Entry]
+        Name=NTE Auto Fish
+        Exec=NTE-Auto-Fish
+        Icon=NTE-Auto-Fish
+        Type=Application
+        Categories=Game;Utility;
+        DESKTOP
+
+        convert -size 256x256 xc:#1a1a2e -fill white \
+          -font DejaVu-Sans -pointsize 48 -gravity center \
+          -annotate 0 "NTE" AppDir/NTE-Auto-Fish.png 2>/dev/null || \
+          touch AppDir/NTE-Auto-Fish.png
+
+        wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+        chmod +x appimagetool-x86_64.AppImage
+        ARCH=x86_64 ./appimagetool-x86_64.AppImage \
+          --appimage-extract-and-run \
+          AppDir \
+          "$APPIMAGE"
+
+        echo "Built: $APPIMAGE"
+    useTTY: false
+    condition: ALWAYS
+  - !PublishArtifactStep
+    name: Publish AppImage
+    artifacts: "*.AppImage"
+    condition: ALWAYS
+  triggers:
+  - !TagCreateTrigger
+    tags: v*-linux.*
+  - !BranchUpdateTrigger
+    branches: linux-wayland-support
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 3600
