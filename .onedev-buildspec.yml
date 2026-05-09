@@ -137,7 +137,7 @@ jobs:
   timeout: 3600
 
 - name: Build Windows EXE
-  jobExecutor: shell-linux
+  jobExecutor: docker-linux
   steps:
   - !CheckoutStep
     name: Checkout
@@ -146,143 +146,30 @@ jobs:
     condition: ALWAYS
   - !CommandStep
     name: Build
-    runInContainer: false
+    runInContainer: true
+    image: ghcr.io/voiddeficit/wine-pyinstaller:latest
     interpreter: !DefaultInterpreter
       commands: |
         set -e
 
-        # ── Persistent storage — survives between CI runs ────────────────
-        STORAGE="/opt/nte-win-build"
-        WORKSPACE="$(pwd)"
-        mkdir -p "$STORAGE/oem" "$STORAGE/source" "$STORAGE/output"
+        pip install \
+          opencv-python-headless numpy dearpygui \
+          keyboard flask werkzeug screeninfo mss pydirectinput
 
-        # ── Copy latest source ───────────────────────────────────────────
-        cp -r templates/ modules/ gui/ start_gui.py config.py "$STORAGE/source/"
-
-        # ── Runner: lives in Windows, watches for trigger.txt ────────────
-        cat > "$STORAGE/nte-runner.ps1" << 'PS1'
-        $ErrorActionPreference = "SilentlyContinue"
-        while ($true) {
-            if (Test-Path "E:\trigger.txt") {
-                Remove-Item "E:\trigger.txt" -Force
-                try {
-                    powershell.exe -ExecutionPolicy Bypass -File "E:\run_build.ps1"
-                } catch {
-                    "FAILED" | Out-File -FilePath "E:\output\status.txt" -Encoding ASCII
-                }
-            }
-            Start-Sleep -Seconds 5
-        }
-        PS1
-
-        # ── Per-build PyInstaller script ─────────────────────────────────
-        cat > "$STORAGE/run_build.ps1" << 'PS1'
-        $ErrorActionPreference = "Stop"
-        $PY = "C:\Program Files\Python311\python.exe"
-        if (-not (Test-Path $PY)) { $PY = "C:\Python311\python.exe" }
-        Remove-Item "C:\nte" -Recurse -Force -ErrorAction SilentlyContinue
-        Copy-Item "E:\source" "C:\nte" -Recurse
-        Set-Location "C:\nte"
-        & $PY -m PyInstaller --noconfirm --onefile --windowed --icon=NONE `
-            "--add-data=templates;templates" `
-            "--add-data=gui;gui" `
-            "--add-data=modules;modules" `
-            "--collect-all=flask" "--collect-all=werkzeug" `
-            "--hidden-import=flask" "--hidden-import=werkzeug" `
-            "--exclude-module=tkinter" "--exclude-module=unittest" `
-            --name NTE-Auto-Fish start_gui.py
-        if (Test-Path "dist\NTE-Auto-Fish.exe") {
-            New-Item -ItemType Directory -Force -Path "E:\output" | Out-Null
-            Copy-Item "dist\NTE-Auto-Fish.exe" "E:\output\NTE-Auto-Fish.exe" -Force
-            "SUCCESS" | Out-File -FilePath "E:\output\status.txt" -Encoding ASCII
-        } else {
-            "FAILED" | Out-File -FilePath "E:\output\status.txt" -Encoding ASCII
-        }
-        PS1
-
-        # ── First-run setup (Windows OOBE, only written before first boot) ─
-        if [ ! -f "$STORAGE/setup_complete.flag" ]; then
-          cat > "$STORAGE/oem/setupComplete.cmd" << 'WINCMD'
-        @@echo off
-        setlocal EnableDelayedExpansion
-        powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\py.exe'"
-        C:\py.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
-        timeout /t 60 /nobreak > nul
-        del C:\py.exe
-        set "PY=C:\Program Files\Python311\python.exe"
-        if not exist "%PY%" set "PY=C:\Python311\python.exe"
-        "%PY%" -m pip install --upgrade pip
-        "%PY%" -m pip install pyinstaller flask werkzeug opencv-python-headless numpy dearpygui keyboard screeninfo mss pydirectinput
-        copy /y "E:\nte-runner.ps1" "C:\nte-runner.ps1"
-        schtasks /create /tn "NTE-Build-Runner" /tr "powershell -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\nte-runner.ps1" /sc ONSTART /ru SYSTEM /f
-        echo READY > "E:\setup_complete.flag"
-        if exist "E:\run_build.ps1" powershell -ExecutionPolicy Bypass -File "E:\run_build.ps1"
-        WINCMD
-        fi
-
-        # ── Decide: reuse existing container or create fresh ────────────
-        rm -f "$STORAGE/output/status.txt" "$STORAGE/trigger.txt"
-
-        CONTAINER_READY=false
-        if docker inspect nte-win-build > /dev/null 2>&1; then
-          if [ -f "$STORAGE/setup_complete.flag" ]; then
-            CONTAINER_READY=true
-          else
-            echo "Container exists but setup incomplete — recreating..."
-            docker stop nte-win-build 2>/dev/null || true
-            docker rm   nte-win-build 2>/dev/null || true
-          fi
-        else
-          rm -f "$STORAGE/setup_complete.flag"
-        fi
-
-        if [ "$CONTAINER_READY" = "true" ]; then
-          echo "Reusing Windows container — fast path (~5-10 min)."
-          touch "$STORAGE/trigger.txt"
-          docker start nte-win-build
-        else
-          echo "First run: Windows installing — slow path (~60 min)."
-          docker run -d --name nte-win-build --privileged --device /dev/kvm \
-            -e VERSION="tiny11" \
-            -e RAM_SIZE="8G" \
-            -e CPU_CORES="4" \
-            -v "$STORAGE:/storage" \
-            ghcr.io/dockur/windows
-        fi
-
-        # ── Poll for result ──────────────────────────────────────────────
-        TIMEOUT=5400
-        ELAPSED=0
-        while [ ! -f "$STORAGE/output/status.txt" ]; do
-          sleep 30
-          ELAPSED=$((ELAPSED + 30))
-          LAST=$(docker logs --tail 3 nte-win-build 2>&1 | tr -d '\r' | grep -v '^$' | tail -1)
-          echo "[$((ELAPSED * 100 / TIMEOUT))%] $LAST"
-          if ! docker inspect nte-win-build > /dev/null 2>&1; then
-            echo "Container died unexpectedly"; exit 1
-          fi
-          if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-            docker stop nte-win-build 2>/dev/null || true
-            echo "Timed out after ${TIMEOUT}s"; exit 1
-          fi
-        done
-
-        # ── Collect artifact ─────────────────────────────────────────────
-        if grep -q SUCCESS "$STORAGE/output/status.txt"; then
-          cp "$STORAGE/output/NTE-Auto-Fish.exe" "$WORKSPACE/NTE-Auto-Fish.exe"
-          echo "Build successful!"
-        else
-          echo "Build FAILED"
-          docker stop nte-win-build 2>/dev/null || true
-          exit 1
-        fi
-
-        docker stop nte-win-build
+        pyinstaller --noconfirm --onefile --windowed --icon=NONE \
+          "--add-data=templates;templates" \
+          "--add-data=gui;gui" \
+          "--add-data=modules;modules" \
+          "--collect-all=flask" "--collect-all=werkzeug" \
+          "--hidden-import=flask" "--hidden-import=werkzeug" \
+          "--hidden-import=screeninfo" \
+          "--exclude-module=tkinter" "--exclude-module=unittest" \
+          --name NTE-Auto-Fish start_gui.py
     useTTY: false
     condition: ALWAYS
   - !PublishArtifactStep
     name: Publish EXE
-    artifacts: "*.exe"
+    artifacts: "dist/NTE-Auto-Fish.exe"
     condition: ALWAYS
   triggers:
   - !TagCreateTrigger
@@ -292,4 +179,4 @@ jobs:
   retryCondition: never
   maxRetries: 1
   retryDelay: 30
-  timeout: 7200
+  timeout: 3600
