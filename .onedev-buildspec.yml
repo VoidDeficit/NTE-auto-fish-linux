@@ -9,22 +9,19 @@ jobs:
     withLfs: false
     condition: ALWAYS
   - !CommandStep
-    name: Bootstrap pacman
+    name: Build
     runInContainer: true
     image: archlinux:base-devel
     interpreter: !DefaultInterpreter
       commands: |
+        set -e
+
+        # ── Bootstrap pacman ────────────────────────────────────────────
         pacman-key --init
         pacman-key --populate archlinux
         pacman -Syu --noconfirm
-    useTTY: false
-    condition: ALWAYS
-  - !CommandStep
-    name: Install system dependencies
-    runInContainer: true
-    image: archlinux:base-devel
-    interpreter: !DefaultInterpreter
-      commands: |
+
+        # ── System dependencies ─────────────────────────────────────────
         pacman -S --noconfirm \
           python python-pip python-gobject \
           gobject-introspection \
@@ -32,26 +29,14 @@ jobs:
           pipewire gst-plugin-pipewire \
           libxtst xdotool \
           fuse2 wget imagemagick
-    useTTY: false
-    condition: ALWAYS
-  - !CommandStep
-    name: Install Python dependencies
-    runInContainer: true
-    image: archlinux:base-devel
-    interpreter: !DefaultInterpreter
-      commands: |
+
+        # ── Python dependencies ─────────────────────────────────────────
         python -m venv --system-site-packages /opt/venv
         /opt/venv/bin/pip install \
           opencv-python-headless numpy dearpygui pynput jeepney \
           keyboard pyinstaller flask screeninfo
-    useTTY: false
-    condition: ALWAYS
-  - !CommandStep
-    name: Build with PyInstaller
-    runInContainer: true
-    image: archlinux:base-devel
-    interpreter: !DefaultInterpreter
-      commands: |
+
+        # ── PyInstaller ─────────────────────────────────────────────────
         /opt/venv/bin/pyinstaller --noconfirm --onedir \
           --collect-all gi \
           --collect-all dearpygui \
@@ -72,14 +57,8 @@ jobs:
           --exclude-module unittest \
           --name NTE-Auto-Fish \
           start_gui.py
-    useTTY: false
-    condition: ALWAYS
-  - !CommandStep
-    name: Bundle typelibs and strip system libs
-    runInContainer: true
-    image: archlinux:base-devel
-    interpreter: !DefaultInterpreter
-      commands: |
+
+        # ── Bundle GStreamer typelibs ────────────────────────────────────
         mkdir -p dist/NTE-Auto-Fish/girepository-1.0
         for typelib in Gst-1.0 GstBase-1.0 GstPbutils-1.0 GstApp-1.0 \
                        GLib-2.0 GObject-2.0 GModule-2.0 Gio-2.0; do
@@ -87,6 +66,7 @@ jobs:
             xargs -I{} cp {} dist/NTE-Auto-Fish/girepository-1.0/ || true
         done
 
+        # ── Strip system .so files ──────────────────────────────────────
         find dist/NTE-Auto-Fish -name "libglib-*.so*"         -delete
         find dist/NTE-Auto-Fish -name "libgobject-*.so*"      -delete
         find dist/NTE-Auto-Fish -name "libgmodule-*.so*"      -delete
@@ -101,14 +81,8 @@ jobs:
         find dist/NTE-Auto-Fish -name "libselinux.so*"        -delete
         find dist/NTE-Auto-Fish -name "libz.so*"              -delete
         find dist/NTE-Auto-Fish -name "libzstd.so*"           -delete
-    useTTY: false
-    condition: ALWAYS
-  - !CommandStep
-    name: Package AppImage
-    runInContainer: true
-    image: archlinux:base-devel
-    interpreter: !DefaultInterpreter
-      commands: |
+
+        # ── AppDir structure ────────────────────────────────────────────
         UPSTREAM=$(cat version.txt | tr -d '[:space:]')
         LINUX=$(cat version-linux.txt | tr -d '[:space:]')
         APPIMAGE="NTE-Auto-Fish-v${UPSTREAM}-linux.v${LINUX}-x86_64.AppImage"
@@ -139,14 +113,13 @@ jobs:
           -annotate 0 "NTE" AppDir/NTE-Auto-Fish.png 2>/dev/null || \
           touch AppDir/NTE-Auto-Fish.png
 
+        # ── Build AppImage ──────────────────────────────────────────────
         wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
         chmod +x appimagetool-x86_64.AppImage
         ARCH=x86_64 ./appimagetool-x86_64.AppImage \
           --appimage-extract-and-run \
           AppDir \
           "$APPIMAGE"
-
-        echo "Built: $APPIMAGE"
     useTTY: false
     condition: ALWAYS
   - !PublishArtifactStep
