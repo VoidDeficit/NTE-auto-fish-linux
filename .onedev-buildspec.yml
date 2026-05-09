@@ -137,7 +137,7 @@ jobs:
   timeout: 3600
 
 - name: Build Windows EXE
-  jobExecutor: docker-linux
+  jobExecutor: shell-linux
   steps:
   - !CheckoutStep
     name: Checkout
