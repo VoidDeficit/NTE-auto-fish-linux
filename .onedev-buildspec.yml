@@ -160,7 +160,7 @@ jobs:
 
         # ── Windows build script (dockur/windows runs /storage/oem/*.cmd) ───
         cat > "$STORAGE/oem/setupComplete.cmd" << 'WINCMD'
-        @echo off
+        @@echo off
         setlocal EnableDelayedExpansion
 
         powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'C:\py.exe'"
