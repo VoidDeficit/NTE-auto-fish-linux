@@ -121,7 +121,7 @@ jobs:
         HERE="$(dirname "$(readlink -f "$0")")"
         BUNDLE="$HERE/usr/bin/NTE-Auto-Fish-bundle"
         export GI_TYPELIB_PATH="$BUNDLE/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
-        exec "$BUNDLE/NTE-Auto-Fish" "$@"
+        exec "$BUNDLE/NTE-Auto-Fish" "$@@"
         APPRUN
         chmod +x AppDir/AppRun
 
