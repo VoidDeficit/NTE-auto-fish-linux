@@ -256,7 +256,8 @@ jobs:
         while [ ! -f "$STORAGE/output/status.txt" ]; do
           sleep 30
           ELAPSED=$((ELAPSED + 30))
-          echo "Waiting... ${ELAPSED}s / ${TIMEOUT}s"
+          LAST=$(docker logs --tail 3 nte-win-build 2>&1 | tr -d '\r' | grep -v '^$' | tail -1)
+          echo "[$((ELAPSED * 100 / TIMEOUT))%] $LAST"
           if ! docker inspect nte-win-build > /dev/null 2>&1; then
             echo "Container died unexpectedly"; exit 1
           fi
