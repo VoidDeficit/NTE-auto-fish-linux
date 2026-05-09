@@ -10,6 +10,7 @@ import ctypes
 import json
 import logging
 import os
+import random
 import sys
 import threading
 import time
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING, Optional
 
 from screeninfo import get_monitors
 
-from config import CFG, AppConfig, DEFAULT_SETTINGS_PATH
+from config import CFG, AppConfig, DEFAULT_SETTINGS_PATH, jitter as cfg_jitter, sample_noise, sample_reaction
 from modules.logic import FishingState, FishingStateMachine, PIDController
 from modules.utils import APP_DIR, bundled_path
 
@@ -418,7 +419,10 @@ class NTEFishingBot:
     def _enter_struggling(self) -> None:
         """Common setup when transitioning into STRUGGLING from any state."""
         self._bait_error_count = 0
-        self.input.press(self.cfg.keys.cast, self.cfg.timing.key_press_duration)
+        hook_dur = self.cfg.timing.key_press_duration
+        if self.cfg.humanization.enabled:
+            hook_dur = cfg_jitter(hook_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+        self.input.press(self.cfg.keys.cast, hook_dur)
         self.pid.reset()
         self._lost_frames = 0
         self._lost_cursor_frames = 0
@@ -429,7 +433,10 @@ class NTEFishingBot:
 
     def _handle_idle(self) -> None:
         self._log("[IDLE] Casting...")
-        self.input.press(self.cfg.keys.cast, self.cfg.timing.key_press_duration)
+        cast_dur = self.cfg.timing.key_press_duration
+        if self.cfg.humanization.enabled:
+            cast_dur = cfg_jitter(cast_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+        self.input.press(self.cfg.keys.cast, cast_dur)
         # Check for error dialog shortly after cast (dialog appears immediately)
         self._stop_event.wait(timeout=0.3)
         if self._roi_error:
@@ -441,7 +448,10 @@ class NTEFishingBot:
                     "waiting for dialog to dismiss..."
                 )
                 self.input.release_all()
-                self._stop_event.wait(timeout=5.0)
+                err_wait = 5.0
+                if self.cfg.humanization.enabled:
+                    err_wait = cfg_jitter(err_wait, self.cfg.humanization.error_dialog_jitter, minimum=3.0)
+                self._stop_event.wait(timeout=err_wait)
                 if self._bait_error_count >= _BAIT_ERROR_THRESHOLD:
                     self._log("[ERROR] Bait likely exhausted, stopping bot.")
                     self.request_stop()
@@ -451,7 +461,10 @@ class NTEFishingBot:
                 self._push_status()
                 return
         # No error, wait out the rest of the cast animation
-        remaining = self.cfg.timing.cast_animation_secs - 0.3
+        anim_secs = self.cfg.timing.cast_animation_secs
+        if self.cfg.humanization.enabled:
+            anim_secs = cfg_jitter(anim_secs, self.cfg.humanization.cast_animation_jitter, minimum=0.8)
+        remaining = anim_secs - 0.3
         if remaining > 0:
             self._stop_event.wait(timeout=remaining)
         if self._stop_flag:
@@ -529,18 +542,53 @@ class NTEFishingBot:
             output = self.pid.update(float(cursor_x), float(target_x), bar_half_width=bar_half)
             self._last_pid_out = output
 
+            hcfg = self.cfg.humanization
             deadband = self.cfg.pid.deadband
-            if output > deadband:
-                self.input.hold(self.cfg.keys.right)
-                self.input.release(self.cfg.keys.left)
-                action = "RIGHT"
-            elif output < -deadband:
-                self.input.hold(self.cfg.keys.left)
-                self.input.release(self.cfg.keys.right)
-                action = "LEFT"
+
+            if hcfg.enabled:
+                # PID noise overlay
+                if hcfg.pid_noise_enabled:
+                    output += sample_noise(hcfg.pid_noise_amplitude, hcfg.pid_noise_dist)
+
+                # Reaction latency
+                react_delay = sample_reaction(
+                    hcfg.reaction_latency_min, hcfg.reaction_latency_max, hcfg.reaction_latency_dist,
+                )
+                if react_delay > 0:
+                    self._stop_event.wait(timeout=react_delay)
+
+                if output > deadband:
+                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
+                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
+                    self.input.release(self.cfg.keys.left)
+                    self.input.pulse_hold(self.cfg.keys.right, hold_t, gap_t)
+                    action = "RIGHT"
+                elif output < -deadband:
+                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
+                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
+                    self.input.release(self.cfg.keys.right)
+                    self.input.pulse_hold(self.cfg.keys.left, hold_t, gap_t)
+                    action = "LEFT"
+                else:
+                    self.input.release(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
+                    if hcfg.deadband_tap_enabled and random.random() < hcfg.deadband_tap_chance:
+                        tap_dir = self.cfg.keys.right if error > 0 else self.cfg.keys.left
+                        tap_dur = random.uniform(hcfg.deadband_tap_duration_min, hcfg.deadband_tap_duration_max)
+                        self.input.press(tap_dir, tap_dur)
+                    action = "NONE"
             else:
-                self.input.release(self.cfg.keys.left)
-                self.input.release(self.cfg.keys.right)
+                if output > deadband:
+                    self.input.hold(self.cfg.keys.right)
+                    self.input.release(self.cfg.keys.left)
+                    action = "RIGHT"
+                elif output < -deadband:
+                    self.input.hold(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
+                    action = "LEFT"
+                else:
+                    self.input.release(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
         else:
             self.input.release(self.cfg.keys.left)
             self.input.release(self.cfg.keys.right)
@@ -606,7 +654,10 @@ class NTEFishingBot:
             self.input.release_all()
             self.sm.transition(FishingState.RESULT)
 
-        self._stop_event.wait(timeout=self.cfg.timing.struggling_poll_interval)
+        poll = self.cfg.timing.struggling_poll_interval
+        if self.cfg.humanization.enabled:
+            poll = cfg_jitter(poll, poll * 0.3, minimum=0.005)
+        self._stop_event.wait(timeout=poll)
 
     def _handle_result(self) -> None:
         # Check for error dialog early — it auto-dismisses in ~2s
@@ -618,7 +669,10 @@ class NTEFishingBot:
                 self._push_status()
                 return
 
-        self._stop_event.wait(timeout=self.cfg.timing.result_wait_secs)
+        result_w = self.cfg.timing.result_wait_secs
+        if self.cfg.humanization.enabled:
+            result_w = cfg_jitter(result_w, self.cfg.humanization.result_wait_jitter, minimum=1.0)
+        self._stop_event.wait(timeout=result_w)
         if self._stop_flag:
             return
 
@@ -658,8 +712,14 @@ class NTEFishingBot:
             cy = self._screen_h // 2 if self._screen_h else _RESULT_CLOSE_FALLBACK_Y
             self.input.click(cx, cy)
         else:
-            self.input.press(self.cfg.keys.exit, self.cfg.timing.key_press_duration)
-        self._stop_event.wait(timeout=0.5)
+            exit_dur = self.cfg.timing.key_press_duration
+            if self.cfg.humanization.enabled:
+                exit_dur = cfg_jitter(exit_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+            self.input.press(self.cfg.keys.exit, exit_dur)
+        close_delay = 0.5
+        if self.cfg.humanization.enabled:
+            close_delay = cfg_jitter(close_delay, self.cfg.humanization.post_close_jitter, minimum=0.2)
+        self._stop_event.wait(timeout=close_delay)
         if self._stop_flag:
             return
         self.sm.transition(FishingState.IDLE)

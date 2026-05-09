@@ -81,6 +81,25 @@ class InputModule:
                 pydirectinput.keyUp(key)
                 self._held.discard(key)
 
+    def pulse_hold(self, key: str, hold_secs: float, release_secs: float) -> None:
+        """Hold a key for hold_secs, then release for release_secs.
+
+        Used for humanized pulsing during STRUGGLING state. The key is
+        tracked in _held during the hold phase so release_all() can
+        clean it up if the bot stops mid-pulse.
+        """
+        with self._lock:
+            self._held.add(key)
+        try:
+            pydirectinput.keyDown(key)
+            time.sleep(hold_secs)
+        finally:
+            pydirectinput.keyUp(key)
+            with self._lock:
+                self._held.discard(key)
+        if release_secs > 0:
+            time.sleep(release_secs)
+
     def release_all(self) -> None:
         """Release all tracked held keys."""
         with self._lock:
