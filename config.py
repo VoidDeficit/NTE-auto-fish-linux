@@ -71,6 +71,8 @@ class TimingConfig:
     key_press_duration: float = 0.05
     waiting_poll_interval: float = 0.05
     struggling_poll_interval: float = 0.01
+    bait_error_threshold: int = 3
+    max_struggle_secs: float = 120.0
 
 
 @dataclass

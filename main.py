@@ -9,6 +9,7 @@ import csv
 import ctypes
 import json
 import logging
+import logging.handlers
 import os
 import random
 import sys
@@ -17,8 +18,6 @@ import time
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Optional
 
-from screeninfo import get_monitors
-
 from config import CFG, AppConfig, DEFAULT_SETTINGS_PATH, jitter as cfg_jitter, sample_noise, sample_reaction
 from modules.logic import FishingState, FishingStateMachine, PIDController
 from modules.utils import APP_DIR, bundled_path
@@ -26,11 +25,13 @@ from modules.utils import APP_DIR, bundled_path
 # Third-party imports — deferred so deps can be auto-installed in __main__.
 try:
     import cv2
+    from screeninfo import get_monitors
     from modules.io_module import CaptureModule, InputModule
     from modules.vision import VisionModule
     _TP_LOADED = True
 except ImportError:
     cv2 = CaptureModule = InputModule = VisionModule = None  # type: ignore[assignment]
+    get_monitors = None  # type: ignore[assignment]
     _TP_LOADED = False
 
 if TYPE_CHECKING:
@@ -43,8 +44,7 @@ _DEFAULT_SCREEN_H = 2160
 _RESULT_CLOSE_FALLBACK_X = 960
 _RESULT_CLOSE_FALLBACK_Y = 540
 _BAR_WIDTH_RATIO = 0.375
-_MAX_STRUGGLE_SECS = 120.0
-_BAIT_ERROR_THRESHOLD = 3
+# _MAX_STRUGGLE_SECS and _BAIT_ERROR_THRESHOLD moved to TimingConfig
 
 
 def _resource_path(*parts: str) -> str:
@@ -56,7 +56,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("fishing_bot.log", encoding="utf-8"),
+        logging.handlers.RotatingFileHandler(
+            os.path.join(APP_DIR, "fishing_bot.log"),
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        ),
     ],
 )
 log = logging.getLogger("NTEFish")
@@ -407,7 +412,9 @@ class NTEFishingBot:
         except KeyboardInterrupt:
             self._log("Ctrl+C received.")
         except Exception as exc:
-            self._log(f"Bot crashed: {exc}", logging.ERROR)
+            log.exception("Bot crashed")
+            if self.bridge:
+                self.bridge.push_log(f"Bot crashed: {exc}")
         finally:
             self._is_paused = True
             self._is_stopped = True
@@ -455,7 +462,7 @@ class NTEFishingBot:
             if self.vision.check_error_region(err_img):
                 self._bait_error_count += 1
                 self._log(
-                    f"[ERROR] Cast error ({self._bait_error_count}/{_BAIT_ERROR_THRESHOLD}), "
+                    f"[ERROR] Cast error ({self._bait_error_count}/{self.cfg.timing.bait_error_threshold}), "
                     "waiting for dialog to dismiss..."
                 )
                 self.input.release_all()
@@ -463,7 +470,7 @@ class NTEFishingBot:
                 if self.cfg.humanization.enabled:
                     err_wait = cfg_jitter(err_wait, self.cfg.humanization.error_dialog_jitter, minimum=3.0)
                 self._stop_event.wait(timeout=err_wait)
-                if self._bait_error_count >= _BAIT_ERROR_THRESHOLD:
+                if self._bait_error_count >= self.cfg.timing.bait_error_threshold:
                     self._log("[ERROR] Bait likely exhausted, stopping bot.")
                     self.request_stop()
                     self._push_status()
@@ -500,9 +507,9 @@ class NTEFishingBot:
             self._stop_event.wait(timeout=self.cfg.timing.waiting_poll_interval)
 
     def _handle_struggling(self) -> None:
-        if self.sm.time_in_state > _MAX_STRUGGLE_SECS:
+        if self.sm.time_in_state > self.cfg.timing.max_struggle_secs:
             self._log(
-                f"[STRUGGLING] Max duration ({_MAX_STRUGGLE_SECS}s) reached, ending.",
+                f"[STRUGGLING] Max duration ({self.cfg.timing.max_struggle_secs}s) reached, ending.",
                 logging.WARNING,
             )
             self.input.release_all()
@@ -955,6 +962,7 @@ if __name__ == "__main__":
         from modules.deps import ensure_dependencies, CLI_PACKAGES
         ensure_dependencies(CLI_PACKAGES)
         import cv2  # noqa: F811
+        from screeninfo import get_monitors  # noqa: F811
         from modules.io_module import CaptureModule, InputModule  # noqa: F811
         from modules.vision import VisionModule  # noqa: F811
 

@@ -9,6 +9,7 @@ CLI_PACKAGES: dict[str, str] = {
     "numpy": "numpy",
     "mss": "mss",
     "pydirectinput": "pydirectinput",
+    "screeninfo": "screeninfo",
 }
 
 # GUI adds these on top of CLI

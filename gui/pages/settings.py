@@ -64,6 +64,8 @@ _TOOLTIPS = {
     "Result wait (s)": "Wait time after fish caught before closing the result dialog.",
     "Waiting poll (s)": "Interval between bite-detection checks.",
     "Tracking poll (s)": "Interval between cursor/target position updates.",
+    "Bait error limit": "Consecutive cast errors before assuming bait is exhausted and stopping.",
+    "Max struggle (s)": "Max seconds in the struggle phase before force-ending (safety timeout).",
     "Toggle": "Hotkey to pause/resume the bot (e.g. f8).",
     "Stop": "Hotkey to stop the bot (e.g. f12).",
     "Humanize input": "Add natural variation to timing and key behavior.",
@@ -149,13 +151,13 @@ def create_settings(
             with dpg.group(horizontal=True):
                 styled_button(
                     "Save Settings", "btn_save",
-                    callback=lambda: _save(bridge),
+                    callback=lambda s, a, u: _save(bridge),
                     variant="primary", width=int(140 * _s), height=int(32 * _s),
                 )
                 dpg.add_spacer(width=int(12 * _s))
                 styled_button(
                     "Reset to Defaults", "btn_reset",
-                    callback=lambda: _on_reset(bridge, on_hotkeys_changed),
+                    callback=lambda s, a, u: _on_reset(bridge, on_hotkeys_changed),
                     variant="neutral", width=int(160 * _s), height=int(32 * _s),
                 )
 
@@ -191,7 +193,7 @@ def _create_category_item(key: str, label: str):
             tag=btn_tag,
             width=int(168 * _s),
             height=item_h,
-            callback=lambda: _switch_category(key),
+            callback=lambda s, a, u, k=key: _switch_category(k),
         )
         dpg.bind_item_theme(btn_tag, _cat_active_theme if is_active else _cat_inactive_theme)
 
@@ -326,6 +328,19 @@ def _build_timing_settings():
             min_val=0.005, max_val=0.050, fmt="%.3f",
             default=CFG.timing.struggling_poll_interval,
             cb=lambda s, d: _set(CFG.timing, "struggling_poll_interval", d),
+        )
+        _input_with_tooltip(
+            "Bait error limit", tag="cfg_timing_bait_err", width=140,
+            default=CFG.timing.bait_error_threshold,
+            cb=lambda s, d: _set_int(
+                CFG.timing, "bait_error_threshold", d, "cfg_timing_bait_err", 1,
+            ),
+        )
+        _slider_with_tooltip(
+            "Max struggle (s)", tag="cfg_timing_max_struggle",
+            min_val=30.0, max_val=300.0, fmt="%.0f",
+            default=CFG.timing.max_struggle_secs,
+            cb=lambda s, d: _set(CFG.timing, "max_struggle_secs", d),
         )
 
 
@@ -675,6 +690,8 @@ def _refresh_values():
     dpg.set_value("cfg_timing_result", CFG.timing.result_wait_secs)
     dpg.set_value("cfg_timing_wait_poll", CFG.timing.waiting_poll_interval)
     dpg.set_value("cfg_timing_track_poll", CFG.timing.struggling_poll_interval)
+    dpg.set_value("cfg_timing_bait_err", CFG.timing.bait_error_threshold)
+    dpg.set_value("cfg_timing_max_struggle", CFG.timing.max_struggle_secs)
 
     dpg.set_value("cfg_key_cast", CFG.keys.cast)
     dpg.set_value("cfg_key_left", CFG.keys.left)

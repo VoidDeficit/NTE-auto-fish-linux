@@ -23,10 +23,13 @@ class CaptureModule:
 
     def __init__(self) -> None:
         self._sct = None
+        self._sct_lock = threading.Lock()
 
     def _get_sct(self):
         if self._sct is None:
-            self._sct = mss.mss()
+            with self._sct_lock:
+                if self._sct is None:
+                    self._sct = mss.mss()
         return self._sct
 
     def grab_bgr(self, roi: dict) -> np.ndarray:
@@ -61,8 +64,10 @@ class InputModule:
     def press(self, key: str, duration: float = 0.05) -> None:
         """Press and release a key without changing the held-key set."""
         pydirectinput.keyDown(key)
-        time.sleep(duration)
-        pydirectinput.keyUp(key)
+        try:
+            time.sleep(duration)
+        finally:
+            pydirectinput.keyUp(key)
 
     def hold(self, key: str) -> None:
         """Keep a key held down."""
