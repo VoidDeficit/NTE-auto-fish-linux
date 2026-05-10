@@ -137,7 +137,7 @@ jobs:
         echo "upstream=${UPSTREAM}"  >> $GITHUB_OUTPUT
         echo "linux=${LINUX}"        >> $GITHUB_OUTPUT
         echo "combined=${COMBINED}"  >> $GITHUB_OUTPUT
-        echo "appimage=NTE-Auto-Fish-${COMBINED}-x86_64.AppImage" >> $GITHUB_OUTPUT
+        echo "appimage=NTE-Auto-Fish-x86_64.AppImage" >> $GITHUB_OUTPUT
         echo "Combined version: ${COMBINED}"
 
     - name: Install system dependencies
