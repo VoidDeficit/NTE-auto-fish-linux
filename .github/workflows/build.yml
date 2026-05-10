@@ -53,6 +53,7 @@ jobs:
       shell: bash
       run: |
         pyinstaller --noconfirm --onefile --windowed --icon=NONE \
+          --manifest NTE-Auto-Fish.exe.manifest \
           --add-data "templates;templates" \
           --exclude-module tkinter \
           --exclude-module unittest \
