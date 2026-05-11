@@ -585,50 +585,20 @@ class NTEFishingBot:
             hcfg = self.cfg.humanization
             deadband = self.cfg.pid.deadband
 
-            if hcfg.enabled:
-                # PID noise overlay
-                if hcfg.pid_noise_enabled:
-                    output += sample_noise(hcfg.pid_noise_amplitude, hcfg.pid_noise_dist)
+            if hcfg.enabled and hcfg.pid_noise_enabled:
+                output += sample_noise(hcfg.pid_noise_amplitude, hcfg.pid_noise_dist)
 
-                # Reaction latency
-                react_delay = sample_reaction(
-                    hcfg.reaction_latency_min, hcfg.reaction_latency_max, hcfg.reaction_latency_dist,
-                )
-                if react_delay > 0:
-                    self._stop_event.wait(timeout=react_delay)
-
-                if output > deadband:
-                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
-                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
-                    self.input.release(self.cfg.keys.left)
-                    self.input.pulse_hold(self.cfg.keys.right, hold_t, gap_t, self._stop_event)
-                    action = "RIGHT"
-                elif output < -deadband:
-                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
-                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
-                    self.input.release(self.cfg.keys.right)
-                    self.input.pulse_hold(self.cfg.keys.left, hold_t, gap_t, self._stop_event)
-                    action = "LEFT"
-                else:
-                    self.input.release(self.cfg.keys.left)
-                    self.input.release(self.cfg.keys.right)
-                    if hcfg.deadband_tap_enabled and random.random() < hcfg.deadband_tap_chance:
-                        tap_dir = self.cfg.keys.right if error > 0 else self.cfg.keys.left
-                        tap_dur = random.uniform(hcfg.deadband_tap_duration_min, hcfg.deadband_tap_duration_max)
-                        self.input.press(tap_dir, tap_dur)
-                    action = "NONE"
+            if output > deadband:
+                self.input.hold(self.cfg.keys.right)
+                self.input.release(self.cfg.keys.left)
+                action = "RIGHT"
+            elif output < -deadband:
+                self.input.hold(self.cfg.keys.left)
+                self.input.release(self.cfg.keys.right)
+                action = "LEFT"
             else:
-                if output > deadband:
-                    self.input.hold(self.cfg.keys.right)
-                    self.input.release(self.cfg.keys.left)
-                    action = "RIGHT"
-                elif output < -deadband:
-                    self.input.hold(self.cfg.keys.left)
-                    self.input.release(self.cfg.keys.right)
-                    action = "LEFT"
-                else:
-                    self.input.release(self.cfg.keys.left)
-                    self.input.release(self.cfg.keys.right)
+                self.input.release(self.cfg.keys.left)
+                self.input.release(self.cfg.keys.right)
         else:
             self.input.release(self.cfg.keys.left)
             self.input.release(self.cfg.keys.right)
