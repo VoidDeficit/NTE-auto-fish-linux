@@ -3,20 +3,31 @@ import importlib
 import subprocess
 import sys
 
-# CLI-only dependencies (no dearpygui, no keyboard)
+_WINDOWS = sys.platform == 'win32'
+
+# Platform-specific base packages
+if _WINDOWS:
+    _PLATFORM_PACKAGES: dict[str, str] = {
+        "mss": "mss",
+        "pydirectinput": "pydirectinput",
+        "keyboard": "keyboard",
+    }
+else:
+    _PLATFORM_PACKAGES: dict[str, str] = {
+        "pynput": "pynput",
+        "jeepney": "jeepney",
+    }
+
 CLI_PACKAGES: dict[str, str] = {
     "cv2": "opencv-python-headless",
     "numpy": "numpy",
-    "mss": "mss",
-    "pydirectinput": "pydirectinput",
     "screeninfo": "screeninfo",
+    **_PLATFORM_PACKAGES,
 }
 
-# GUI adds these on top of CLI
 GUI_PACKAGES: dict[str, str] = {
     **CLI_PACKAGES,
     "dearpygui": "dearpygui",
-    "keyboard": "keyboard",
 }
 
 
@@ -24,7 +35,7 @@ def _is_importable(module_name: str) -> bool:
     try:
         importlib.import_module(module_name)
         return True
-    except ImportError:
+    except (ImportError, AttributeError, OSError):
         return False
 
 
