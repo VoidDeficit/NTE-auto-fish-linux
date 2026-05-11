@@ -4,7 +4,15 @@ import sys
 
 
 def app_dir() -> str:
-    """Return the application root directory."""
+    """Return a writable directory for user data (logs, configs)."""
+    if getattr(sys, "frozen", False) and sys.platform != "win32":
+        # AppImage / Linux bundle: executable is in a read-only mount
+        data_dir = os.path.join(
+            os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+            "NTE-Auto-Fish",
+        )
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
