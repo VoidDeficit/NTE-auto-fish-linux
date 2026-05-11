@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -288,6 +289,30 @@ class InputModule:
             _pdi.keyUp(key)
         else:
             self._kb.release(_resolve(key))
+
+    def pulse_hold(
+        self, key: str, hold_secs: float, release_secs: float,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
+        """Hold a key for hold_secs, then release for release_secs.
+
+        Used for humanized pulsing during STRUGGLING state. The key is
+        tracked in _held during the hold phase so release_all() can
+        clean it up if the bot stops mid-pulse.  Pass *stop_event* to
+        make the sleeps interruptible.
+        """
+        wait = stop_event.wait if stop_event else time.sleep
+        with self._lock:
+            self._held.add(key)
+        try:
+            pydirectinput.keyDown(key)
+            wait(timeout=hold_secs)
+        finally:
+            pydirectinput.keyUp(key)
+            with self._lock:
+                self._held.discard(key)
+        if release_secs > 0 and (stop_event is None or not stop_event.is_set()):
+            wait(timeout=release_secs)
 
     def release_all(self) -> None:
         with self._lock:

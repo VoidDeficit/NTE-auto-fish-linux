@@ -1,6 +1,7 @@
 """Single source of runtime configuration for NTE Auto-Fish."""
 import json
 import os
+import random
 from dataclasses import asdict, dataclass, field
 from typing import Tuple
 
@@ -66,10 +67,46 @@ class TimingConfig:
     cast_animation_secs: float = 1.8
     bite_timeout_secs: float = 45.0
     lost_frames_threshold: int = 40
-    result_wait_secs: float = 2.2
+    result_wait_secs: float = 3.0
     key_press_duration: float = 0.05
     waiting_poll_interval: float = 0.05
     struggling_poll_interval: float = 0.01
+    bait_error_threshold: int = 3
+    max_struggle_secs: float = 120.0
+
+
+@dataclass
+class HumanizationConfig:
+    enabled: bool = True
+
+    # Key hold pulse modulation (STRUGGLING)
+    pulse_hold_min: float = 0.030
+    pulse_hold_max: float = 0.080
+    pulse_release_min: float = 0.008
+    pulse_release_max: float = 0.025
+
+    # Deadband micro-corrections (STRUGGLING)
+    deadband_tap_enabled: bool = True
+    deadband_tap_chance: float = 0.30
+    deadband_tap_duration_min: float = 0.015
+    deadband_tap_duration_max: float = 0.035
+
+    # Reaction latency (STRUGGLING)
+    reaction_latency_min: float = 0.04
+    reaction_latency_max: float = 0.12
+    reaction_latency_dist: str = "uniform"  # "uniform" / "gaussian" / "exponential"
+
+    # PID output noise overlay (STRUGGLING)
+    pid_noise_enabled: bool = True
+    pid_noise_amplitude: float = 3.0  # pixels
+    pid_noise_dist: str = "gaussian"  # "uniform" / "gaussian"
+
+    # Timing jitter spreads (+/- on base values)
+    cast_hold_jitter: float = 0.015
+    cast_animation_jitter: float = 0.20
+    result_wait_jitter: float = 0.25
+    post_close_jitter: float = 0.12
+    error_dialog_jitter: float = 0.40
 
 
 @dataclass
@@ -104,6 +141,7 @@ class AppConfig:
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     keys: KeyConfig = field(default_factory=KeyConfig)
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
+    humanization: HumanizationConfig = field(default_factory=HumanizationConfig)
     min_blue_pixels: int = 300
     result_close_method: str = "click"
     debug_mode: bool = False
@@ -146,6 +184,35 @@ class AppConfig:
             update_obj(self, data)
         except Exception as exc:
             print(f"Failed to load settings: {exc}")
+
+
+def jitter(base: float, spread: float, minimum: float = 0.0) -> float:
+    """Return base +/- spread, clamped to [minimum, ...]."""
+    if spread <= 0.0:
+        return base
+    return max(minimum, base + random.uniform(-spread, spread))
+
+
+def sample_reaction(min_val: float, max_val: float, dist: str = "uniform") -> float:
+    """Sample a reaction delay from the specified distribution."""
+    if min_val >= max_val:
+        return min_val
+    if dist == "gaussian":
+        mean = (min_val + max_val) / 2
+        std = (max_val - min_val) / 6  # 99.7% within range
+        return max(min_val, min(max_val, random.gauss(mean, std)))
+    if dist == "exponential":
+        span = max_val - min_val
+        # mean = span/3, so most values cluster toward the low end
+        return min(max_val, min_val + random.expovariate(3.0 / span))
+    return random.uniform(min_val, max_val)
+
+
+def sample_noise(amplitude: float, dist: str = "gaussian") -> float:
+    """Sample PID noise from the specified distribution."""
+    if dist == "gaussian":
+        return random.gauss(0, amplitude / 2)
+    return random.uniform(-amplitude, amplitude)
 
 
 CFG = AppConfig()

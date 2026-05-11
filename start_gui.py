@@ -1,4 +1,8 @@
+"""GUI entry point for NTE Auto-Fish."""
 import argparse
+from modules.deps import ensure_dependencies, GUI_PACKAGES
+
+ensure_dependencies(GUI_PACKAGES)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NTE Auto-Fish")
