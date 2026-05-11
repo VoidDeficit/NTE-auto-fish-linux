@@ -133,6 +133,7 @@ class CaptureModule:
             self._lock = threading.Lock()
             self._latest_frame: np.ndarray | None = None
             self._running = False
+            self._capture_thread: threading.Thread | None = None
             self._node_id = node_id
             self._init_pipeline()
 
@@ -169,7 +170,8 @@ class CaptureModule:
         print(f"[Capture] Ready! Resolution: {self._width}x{self._height}")
 
         self._running = True
-        threading.Thread(target=self._capture_loop, daemon=True).start()
+        self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._capture_thread.start()
 
     def _decode_sample(self, sample) -> np.ndarray | None:
         try:
@@ -239,6 +241,16 @@ class CaptureModule:
             self._sct.close()
         else:
             self._running = False
+            # Send EOS so pull-sample unblocks immediately instead of blocking
+            # until the next frame arrives, which would cause a segfault when
+            # the pipeline is set to NULL while the capture thread is inside it.
+            if self._pipeline:
+                try:
+                    self._pipeline.send_event(Gst.Event.new_eos())
+                except Exception:
+                    pass
+            if self._capture_thread and self._capture_thread.is_alive():
+                self._capture_thread.join(timeout=2.0)
             if self._pipeline:
                 self._pipeline.set_state(Gst.State.NULL)
                 self._pipeline = None

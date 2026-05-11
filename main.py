@@ -146,7 +146,10 @@ class NTEFishingBot:
         self._is_stopped = True
         self._last_pid_out = 0.0
         self._fps = 0.0
-        self.input.release_all()
+        # release_all() is called in run()'s finally block from the bot thread.
+        # Do NOT call it here — this method may be invoked from a pynput listener
+        # callback on Linux, and calling pynput Controller from within a Listener
+        # callback causes an Xlib deadlock/segfault.
 
     def publish_status(self) -> None:
         self._push_status()
