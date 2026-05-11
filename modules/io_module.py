@@ -308,10 +308,16 @@ class InputModule:
         with self._lock:
             self._held.add(key)
         try:
-            pydirectinput.keyDown(key)
+            if _WINDOWS:
+                _pdi.keyDown(key)
+            else:
+                self._kb.press(_resolve(key))
             wait(timeout=hold_secs)
         finally:
-            pydirectinput.keyUp(key)
+            if _WINDOWS:
+                _pdi.keyUp(key)
+            else:
+                self._kb.release(_resolve(key))
             with self._lock:
                 self._held.discard(key)
         if release_secs > 0 and (stop_event is None or not stop_event.is_set()):
