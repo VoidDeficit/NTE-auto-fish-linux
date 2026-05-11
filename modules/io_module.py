@@ -254,6 +254,17 @@ class CaptureModule:
             if self._pipeline:
                 self._pipeline.set_state(Gst.State.NULL)
                 self._pipeline = None
+            self._sink = None
+            self._capture_thread = None
+
+    def reopen(self) -> None:
+        """Re-initialise the capture after close(), reusing the saved PipeWire node."""
+        if _WINDOWS or self._running:
+            return
+        # _node_id is preserved from the first portal session so the user is
+        # not prompted again — PipeWire will reconnect to the same stream.
+        self._latest_frame = None
+        self._init_pipeline()
 
 
 class InputModule:

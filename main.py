@@ -125,6 +125,7 @@ class NTEFishingBot:
         self._stop_event.clear()
         self._is_stopped = False
         self._is_paused = paused
+        self.capture.reopen()
         self.sm = FishingStateMachine()
         self.pid.reset()
         self._fish_count = 0
