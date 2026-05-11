@@ -18,6 +18,7 @@ _WINDOWS = sys.platform == 'win32'
 if _WINDOWS:
     import mss as _mss
     import pydirectinput as _pdi
+    _pdi.PAUSE = 0.0  # remove per-call 0.1 s delay
 
 # ── Linux-only imports ───────────────────────────────────────────────────────
 else:
@@ -213,8 +214,9 @@ class CaptureModule:
     def grab_bgr(self, roi: dict) -> np.ndarray:
         if _WINDOWS:
             region = {k: roi[k] for k in ('top', 'left', 'width', 'height')}
-            img = np.array(self._sct.grab(region))
-            return np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
+            sct_img = self._sct.grab(region)
+            arr = np.frombuffer(sct_img.raw, dtype=np.uint8).reshape(sct_img.height, sct_img.width, 4)
+            return np.ascontiguousarray(arr[:, :, :3])
         else:
             frame = self._get_frame()
             t, l, h, w = roi['top'], roi['left'], roi['height'], roi['width']
@@ -223,8 +225,9 @@ class CaptureModule:
     def grab_full_screen(self) -> np.ndarray:
         if _WINDOWS:
             mon = self._sct.monitors[1]
-            img = np.array(self._sct.grab(mon))
-            return np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
+            sct_img = self._sct.grab(mon)
+            arr = np.frombuffer(sct_img.raw, dtype=np.uint8).reshape(sct_img.height, sct_img.width, 4)
+            return np.ascontiguousarray(arr[:, :, :3])
         else:
             return self._get_frame()
 

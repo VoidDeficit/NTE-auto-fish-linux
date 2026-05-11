@@ -536,6 +536,7 @@ class NTEFishingBot:
             return
 
         bar_img = self.capture.grab_bgr(self._roi_bar)
+        bar_hsv = cv2.cvtColor(bar_img, cv2.COLOR_BGR2HSV)
         cursor_x, _ = self.vision.get_hsv_centroid_x(
             bar_img,
             self.cfg.hsv.cursor.lower,
@@ -543,6 +544,7 @@ class NTEFishingBot:
             min_area=self._scaled_min_area,
             ignore_margin_ratio=self.cfg.roi.ignore_margin_ratio,
             last_known_x=self._cursor_x_rel,
+            hsv_img=bar_hsv,
         )
         target_x, _ = self.vision.get_hsv_centroid_x(
             bar_img,
@@ -551,6 +553,7 @@ class NTEFishingBot:
             min_area=self._scaled_min_area,
             ignore_margin_ratio=0.0,
             last_known_x=self._target_x_rel,
+            hsv_img=bar_hsv,
         )
 
         self._cursor_x_rel = cursor_x
