@@ -112,6 +112,7 @@ class NTEFishingBot:
         self._is_stopped = True
         self._fps = 0.0
         self._last_time = time.time()
+        self._last_frame_t: float = 0.0
 
         self._log("Bot initialized.")
 
@@ -183,6 +184,23 @@ class NTEFishingBot:
                 is_stopped=self._is_stopped,
             )
         )
+
+    def _push_web_frame(self) -> None:
+        if not self.bridge:
+            return
+        t = time.time()
+        if t - self._last_frame_t < 0.5:
+            return
+        self._last_frame_t = t
+        try:
+            frame = self.capture.grab_full_screen()
+            h, w = frame.shape[:2]
+            if w > 1280:
+                frame = cv2.resize(frame, (1280, int(h * 1280 / w)))
+            _, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            self.bridge.push_frame(jpg.tobytes())
+        except Exception:
+            pass
 
     @staticmethod
     def _roi_tuple(roi: dict) -> tuple[int, int, int, int]:
@@ -369,6 +387,7 @@ class NTEFishingBot:
 
                 self._poll_commands()
                 self._push_status()
+                self._push_web_frame()
 
                 if self._is_paused:
                     self._stop_event.wait(timeout=0.1)
@@ -724,7 +743,8 @@ class NTEFishingBot:
             return
 
         self._fish_count += 1
-        self._log(f"[RESULT] Fish #{self._fish_count}.")
+        self._log(f"[RESULT] ✓ Fish caught! Total: #{self._fish_count} 🐟")
+        self._log(f"[DEBUG] Key PRESS → {self.cfg.keys.exit.upper()} (closing result screen)")
         if self.cfg.result_close_method == "click":
             cx = self._mon_x + (self._screen_w // 2 if self._screen_w else _RESULT_CLOSE_FALLBACK_X)
             cy = self._mon_y + (self._screen_h // 2 if self._screen_h else _RESULT_CLOSE_FALLBACK_Y)
@@ -757,10 +777,60 @@ def _set_dpi_awareness() -> None:
 # CLI command handlers
 # ---------------------------------------------------------------------------
 
-def _cmd_start(_args: argparse.Namespace) -> None:
-    bot = NTEFishingBot()
-    bot.calibrate()
-    bot.run()
+def _cmd_start(args: argparse.Namespace) -> None:
+    if not getattr(args, "web", False):
+        bot = NTEFishingBot()
+        bot.calibrate()
+        bot.run()
+        return
+
+    from gui.bridge import BotBridge
+    from modules.web_server import WebServer
+
+    bridge = BotBridge()
+    port = getattr(args, "web_port", 5000)
+
+    bot_thread_ref: list[threading.Thread] = []
+    bot_lock = threading.Lock()
+
+    def on_start():
+        with bot_lock:
+            alive = bool(bot_thread_ref and bot_thread_ref[0].is_alive())
+            if alive:
+                bridge.send_cmd("resume")
+                return
+
+            def run_bot():
+                # Create bot (and mss capture) on the thread that will use it.
+                # mss/GDI device contexts are thread-affine on Windows.
+                bot = NTEFishingBot(bridge=bridge)
+                bot.prepare_for_run(paused=False)
+                bot.publish_status()
+                try:
+                    bot.calibrate()
+                    bot.run()
+                except Exception as exc:
+                    bridge.push_log(f"Bot crashed: {exc}")
+
+            t = threading.Thread(target=run_bot, daemon=True)
+            if bot_thread_ref:
+                bot_thread_ref[0] = t
+            else:
+                bot_thread_ref.append(t)
+            t.start()
+
+    web = WebServer(bridge=bridge, port=port, on_start=on_start,
+                    on_stop=lambda: bridge.send_cmd("stop"))
+    web.start()
+    bridge.push_log(f"Web dashboard: http://localhost:{port}")
+    print(f"Web dashboard → http://localhost:{port}")
+    print("Open the dashboard and press Start.  Ctrl+C to quit.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        bridge.send_cmd("stop")
+        print("\nStopped.")
 
 
 def _cmd_calibrate(_args: argparse.Namespace) -> None:
@@ -974,7 +1044,15 @@ if __name__ == "__main__":
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("start", help="Run the fishing bot")
+    start_parser = sub.add_parser("start", help="Run the fishing bot")
+    start_parser.add_argument(
+        "--web", action="store_true",
+        help="enable experimental web dashboard (requires flask)",
+    )
+    start_parser.add_argument(
+        "--web-port", type=int, default=5000, dest="web_port", metavar="PORT",
+        help="web dashboard port (default: 5000)",
+    )
     sub.add_parser("calibrate", help="Calibrate and show ROI results")
     sub.add_parser("reset", help="Reset settings.json to defaults")
 

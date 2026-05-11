@@ -30,13 +30,23 @@ APP_TITLE = f"NTE Auto-Fish v{VERSION}"
 
 
 class FishingGUI:
-    def __init__(self):
+    def __init__(self, web_port: int | None = None):
         self._enable_hidpi()
         self.bridge = BotBridge()
         self.bot = NTEFishingBot(bridge=self.bridge)
         self.bot_thread: threading.Thread | None = None
         self._bot_lock = threading.Lock()
         self._hotkey_handles: list = []
+
+        self._web_server = None
+        if web_port is not None:
+            from modules.web_server import WebServer
+            self._web_server = WebServer(
+                bridge=self.bridge,
+                port=web_port,
+                on_start=self._start_bot,
+                on_stop=self._stop_bot,
+            )
 
         self._setup_dpg()
         self._setup_hotkeys()
@@ -207,7 +217,7 @@ class FishingGUI:
 
     # ── Bot lifecycle ───────────────────────────────────────────────────
 
-    def _start_bot(self):
+    def _start_bot(self, paused: bool = False):
         with self._bot_lock:
             if self.bot_thread and self.bot_thread.is_alive():
                 if self.bot._stop_flag:
@@ -218,11 +228,11 @@ class FishingGUI:
                 self.bridge.send_cmd("resume")
                 return
 
-            self.bot.prepare_for_run(paused=True)
+            self.bot.prepare_for_run(paused=paused)
             self.bot.publish_status()
             self.bot_thread = threading.Thread(target=self._run_bot_thread, daemon=True)
             self.bot_thread.start()
-            self.bridge.push_log("Bot started paused.")
+            self.bridge.push_log("Bot started." if not paused else "Bot started paused.")
 
     def _run_bot_thread(self):
         try:
@@ -277,9 +287,15 @@ class FishingGUI:
 
     def run(self):
         try:
+            if self._web_server:
+                self._web_server.start()
+                self.bridge.push_log(
+                    f"Web dashboard started → http://localhost:{self._web_server._port}"
+                )
             dpg.show_viewport()
             self._position_viewport_away_from_roi()
-            self._start_bot()
+            if not self._web_server:
+                self._start_bot(paused=True)  # auto-start stays paused so GUI is visible first
             while dpg.is_dearpygui_running():
                 update_dashboard_ui(self.bridge)
                 update_logs_ui(self.bridge)

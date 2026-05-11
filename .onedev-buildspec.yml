@@ -85,7 +85,7 @@ jobs:
         # ── AppDir structure ────────────────────────────────────────────
         UPSTREAM=$(cat version.txt | tr -d '[:space:]')
         LINUX=$(cat version-linux.txt | tr -d '[:space:]')
-        APPIMAGE="NTE-Auto-Fish-v${UPSTREAM}-linux.v${LINUX}-x86_64.AppImage"
+        APPIMAGE="NTE-Auto-Fish-x86_64.AppImage"
 
         mkdir -p AppDir/usr/bin
         cp -r dist/NTE-Auto-Fish AppDir/usr/bin/NTE-Auto-Fish-bundle
