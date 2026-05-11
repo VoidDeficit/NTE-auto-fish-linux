@@ -36,11 +36,12 @@ from screeninfo import get_monitors
 # ---------------------------------------------------------------------------
 
 CATEGORIES = [
-    ("pid",         "PID Tuning"),
-    ("vision",      "Vision & Detection"),
-    ("timing",      "Timing"),
-    ("input",       "Input & Hotkeys"),
-    ("calibration", "Calibration"),
+    ("pid",           "PID Tuning"),
+    ("vision",        "Vision & Detection"),
+    ("timing",        "Timing"),
+    ("input",         "Input & Hotkeys"),
+    ("calibration",   "Calibration"),
+    ("humanization",  "Humanization"),
 ]
 
 _RESULT_METHODS = {
@@ -63,8 +64,25 @@ _TOOLTIPS = {
     "Result wait (s)": "Wait time after fish caught before closing the result dialog.",
     "Waiting poll (s)": "Interval between bite-detection checks.",
     "Tracking poll (s)": "Interval between cursor/target position updates.",
+    "Bait error limit": "Consecutive cast errors before assuming bait is exhausted and stopping.",
+    "Max struggle (s)": "Max seconds in the struggle phase before force-ending (safety timeout).",
     "Toggle": "Hotkey to pause/resume the bot (e.g. f8).",
     "Stop": "Hotkey to stop the bot (e.g. f12).",
+    "Humanize input": "Add natural variation to timing and key behavior.",
+    "Pulse hold min": "Minimum key hold duration during struggle (seconds).",
+    "Pulse hold max": "Maximum key hold duration during struggle (seconds).",
+    "Pulse gap min": "Minimum release gap between pulses (seconds).",
+    "Pulse gap max": "Maximum release gap between pulses (seconds).",
+    "Deadband taps": "Send micro-corrections when cursor is near center.",
+    "Tap chance": "Probability of a micro-tap per cycle in the deadband.",
+    "Reaction min": "Minimum reaction delay before responding (seconds).",
+    "Reaction max": "Maximum reaction delay before responding (seconds).",
+    "Reaction dist": "Distribution: uniform (even), gaussian (clustered), exponential (mostly short).",
+    "PID noise": "Add random noise to PID output for less predictable key timing.",
+    "Noise amplitude": "Maximum noise magnitude added to PID output (pixels).",
+    "Noise dist": "Noise distribution: uniform (flat) or gaussian (bell curve).",
+    "Cast jitter": "Random variation on cast timing (+/- seconds).",
+    "Result jitter": "Random variation on result wait (+/- seconds).",
 }
 
 # ---------------------------------------------------------------------------
@@ -125,6 +143,7 @@ def create_settings(
             _build_timing_settings()
             _build_input_settings(bridge, on_hotkeys_changed)
             _build_calibration_settings()
+            _build_humanization_settings()
 
             dpg.add_spacer(height=int(20 * _s))
 
@@ -132,13 +151,13 @@ def create_settings(
             with dpg.group(horizontal=True):
                 styled_button(
                     "Save Settings", "btn_save",
-                    callback=lambda: _save(bridge),
+                    callback=lambda s, a, u: _save(bridge),
                     variant="primary", width=int(140 * _s), height=int(32 * _s),
                 )
                 dpg.add_spacer(width=int(12 * _s))
                 styled_button(
                     "Reset to Defaults", "btn_reset",
-                    callback=lambda: _on_reset(bridge, on_hotkeys_changed),
+                    callback=lambda s, a, u: _on_reset(bridge, on_hotkeys_changed),
                     variant="neutral", width=int(160 * _s), height=int(32 * _s),
                 )
 
@@ -174,7 +193,7 @@ def _create_category_item(key: str, label: str):
             tag=btn_tag,
             width=int(168 * _s),
             height=item_h,
-            callback=lambda: _switch_category(key),
+            callback=lambda s, a, u: _switch_category(key),
         )
         dpg.bind_item_theme(btn_tag, _cat_active_theme if is_active else _cat_inactive_theme)
 
@@ -310,6 +329,19 @@ def _build_timing_settings():
             default=CFG.timing.struggling_poll_interval,
             cb=lambda s, d: _set(CFG.timing, "struggling_poll_interval", d),
         )
+        _input_with_tooltip(
+            "Bait error limit", tag="cfg_timing_bait_err", width=140,
+            default=CFG.timing.bait_error_threshold,
+            cb=lambda s, d: _set_int(
+                CFG.timing, "bait_error_threshold", d, "cfg_timing_bait_err", 1,
+            ),
+        )
+        _slider_with_tooltip(
+            "Max struggle (s)", tag="cfg_timing_max_struggle",
+            min_val=30.0, max_val=300.0, fmt="%.0f",
+            default=CFG.timing.max_struggle_secs,
+            cb=lambda s, d: _set(CFG.timing, "max_struggle_secs", d),
+        )
 
 
 def _build_input_settings(
@@ -412,6 +444,121 @@ def _build_calibration_settings():
         )
 
 
+def _build_humanization_settings():
+    with dpg.group(tag="settings_group_humanization"):
+        section_header("Humanization", color=ACCENT)
+        caption_text("Natural variation to make the bot less mechanical.")
+        dpg.add_spacer(height=8)
+
+        _checkbox_with_tooltip(
+            "Humanize input", tag="cfg_hum_enabled",
+            default=CFG.humanization.enabled,
+            cb=lambda s, d: _set(CFG.humanization, "enabled", d),
+        )
+
+        dpg.add_spacer(height=8)
+        dpg.add_text("Key Pulse Timing", color=TEXT_MUTED)
+        dpg.add_spacer(height=4)
+        _slider_with_tooltip(
+            "Pulse hold min", tag="cfg_hum_pulse_hold_min",
+            min_val=0.010, max_val=0.150, fmt="%.3f",
+            default=CFG.humanization.pulse_hold_min,
+            cb=lambda s, d: _set(CFG.humanization, "pulse_hold_min", d),
+        )
+        _slider_with_tooltip(
+            "Pulse hold max", tag="cfg_hum_pulse_hold_max",
+            min_val=0.020, max_val=0.200, fmt="%.3f",
+            default=CFG.humanization.pulse_hold_max,
+            cb=lambda s, d: _set(CFG.humanization, "pulse_hold_max", d),
+        )
+        _slider_with_tooltip(
+            "Pulse gap min", tag="cfg_hum_pulse_release_min",
+            min_val=0.002, max_val=0.050, fmt="%.3f",
+            default=CFG.humanization.pulse_release_min,
+            cb=lambda s, d: _set(CFG.humanization, "pulse_release_min", d),
+        )
+        _slider_with_tooltip(
+            "Pulse gap max", tag="cfg_hum_pulse_release_max",
+            min_val=0.005, max_val=0.080, fmt="%.3f",
+            default=CFG.humanization.pulse_release_max,
+            cb=lambda s, d: _set(CFG.humanization, "pulse_release_max", d),
+        )
+
+        dpg.add_spacer(height=8)
+        dpg.add_text("Deadband Micro-corrections", color=TEXT_MUTED)
+        dpg.add_spacer(height=4)
+        _checkbox_with_tooltip(
+            "Deadband taps", tag="cfg_hum_db_tap",
+            default=CFG.humanization.deadband_tap_enabled,
+            cb=lambda s, d: _set(CFG.humanization, "deadband_tap_enabled", d),
+        )
+        _slider_with_tooltip(
+            "Tap chance", tag="cfg_hum_db_chance",
+            min_val=0.0, max_val=1.0, fmt="%.2f",
+            default=CFG.humanization.deadband_tap_chance,
+            cb=lambda s, d: _set(CFG.humanization, "deadband_tap_chance", d),
+        )
+
+        dpg.add_spacer(height=8)
+        dpg.add_text("Reaction Latency", color=TEXT_MUTED)
+        dpg.add_spacer(height=4)
+        _slider_with_tooltip(
+            "Reaction min", tag="cfg_hum_react_min",
+            min_val=0.0, max_val=0.200, fmt="%.3f",
+            default=CFG.humanization.reaction_latency_min,
+            cb=lambda s, d: _set(CFG.humanization, "reaction_latency_min", d),
+        )
+        _slider_with_tooltip(
+            "Reaction max", tag="cfg_hum_react_max",
+            min_val=0.0, max_val=0.300, fmt="%.3f",
+            default=CFG.humanization.reaction_latency_max,
+            cb=lambda s, d: _set(CFG.humanization, "reaction_latency_max", d),
+        )
+        _combo_with_tooltip(
+            "Reaction dist", tag="cfg_hum_react_dist",
+            items=["uniform", "gaussian", "exponential"],
+            default=CFG.humanization.reaction_latency_dist,
+            cb=lambda s, d: _set(CFG.humanization, "reaction_latency_dist", d),
+        )
+
+        dpg.add_spacer(height=8)
+        dpg.add_text("PID Noise", color=TEXT_MUTED)
+        dpg.add_spacer(height=4)
+        _checkbox_with_tooltip(
+            "PID noise", tag="cfg_hum_noise_enabled",
+            default=CFG.humanization.pid_noise_enabled,
+            cb=lambda s, d: _set(CFG.humanization, "pid_noise_enabled", d),
+        )
+        _slider_with_tooltip(
+            "Noise amplitude", tag="cfg_hum_noise_amp",
+            min_val=0.0, max_val=15.0, fmt="%.1f",
+            default=CFG.humanization.pid_noise_amplitude,
+            cb=lambda s, d: _set(CFG.humanization, "pid_noise_amplitude", d),
+        )
+        _combo_with_tooltip(
+            "Noise dist", tag="cfg_hum_noise_dist",
+            items=["uniform", "gaussian"],
+            default=CFG.humanization.pid_noise_dist,
+            cb=lambda s, d: _set(CFG.humanization, "pid_noise_dist", d),
+        )
+
+        dpg.add_spacer(height=8)
+        dpg.add_text("Timing Jitter", color=TEXT_MUTED)
+        dpg.add_spacer(height=4)
+        _slider_with_tooltip(
+            "Cast jitter", tag="cfg_hum_cast_jitter",
+            min_val=0.0, max_val=0.50, fmt="%.2f",
+            default=CFG.humanization.cast_animation_jitter,
+            cb=lambda s, d: _set(CFG.humanization, "cast_animation_jitter", d),
+        )
+        _slider_with_tooltip(
+            "Result jitter", tag="cfg_hum_result_jitter",
+            min_val=0.0, max_val=0.50, fmt="%.2f",
+            default=CFG.humanization.result_wait_jitter,
+            cb=lambda s, d: _set(CFG.humanization, "result_wait_jitter", d),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Helper widgets
 # ---------------------------------------------------------------------------
@@ -458,6 +605,20 @@ def _text_input_with_tooltip(
     dpg.add_input_text(
         label=label, tag=tag, width=width,
         default_value=default, on_enter=True, callback=cb,
+    )
+    _add_tooltip(tag, label)
+    tip = _TOOLTIPS.get(label)
+    if tip:
+        caption_text(tip)
+        dpg.add_spacer(height=4)
+
+
+def _combo_with_tooltip(
+    label: str, tag: str, items: list[str], default: str, cb: Callable,
+):
+    dpg.add_combo(
+        label=label, tag=tag, items=items,
+        default_value=default, width=160, callback=cb,
     )
     _add_tooltip(tag, label)
     tip = _TOOLTIPS.get(label)
@@ -529,6 +690,8 @@ def _refresh_values():
     dpg.set_value("cfg_timing_result", CFG.timing.result_wait_secs)
     dpg.set_value("cfg_timing_wait_poll", CFG.timing.waiting_poll_interval)
     dpg.set_value("cfg_timing_track_poll", CFG.timing.struggling_poll_interval)
+    dpg.set_value("cfg_timing_bait_err", CFG.timing.bait_error_threshold)
+    dpg.set_value("cfg_timing_max_struggle", CFG.timing.max_struggle_secs)
 
     dpg.set_value("cfg_key_cast", CFG.keys.cast)
     dpg.set_value("cfg_key_left", CFG.keys.left)
@@ -545,10 +708,28 @@ def _refresh_values():
     dpg.set_value("cfg_cal_confidence", CFG.calibration.confidence_threshold)
     dpg.set_value("cfg_cal_roi_padding", CFG.calibration.roi_padding)
 
-    dpg.set_value("cfg_monitor_index", CFG.monitor_index)
+    monitors = _monitor_labels()
+    idx = min(CFG.monitor_index, len(monitors) - 1)
+    dpg.set_value("cfg_monitor_index", monitors[idx])
 
     dpg.set_value("cfg_hotkey_toggle", CFG.hotkeys.toggle)
     dpg.set_value("cfg_hotkey_stop", CFG.hotkeys.stop)
+
+    dpg.set_value("cfg_hum_enabled", CFG.humanization.enabled)
+    dpg.set_value("cfg_hum_pulse_hold_min", CFG.humanization.pulse_hold_min)
+    dpg.set_value("cfg_hum_pulse_hold_max", CFG.humanization.pulse_hold_max)
+    dpg.set_value("cfg_hum_pulse_release_min", CFG.humanization.pulse_release_min)
+    dpg.set_value("cfg_hum_pulse_release_max", CFG.humanization.pulse_release_max)
+    dpg.set_value("cfg_hum_db_tap", CFG.humanization.deadband_tap_enabled)
+    dpg.set_value("cfg_hum_db_chance", CFG.humanization.deadband_tap_chance)
+    dpg.set_value("cfg_hum_react_min", CFG.humanization.reaction_latency_min)
+    dpg.set_value("cfg_hum_react_max", CFG.humanization.reaction_latency_max)
+    dpg.set_value("cfg_hum_react_dist", CFG.humanization.reaction_latency_dist)
+    dpg.set_value("cfg_hum_noise_enabled", CFG.humanization.pid_noise_enabled)
+    dpg.set_value("cfg_hum_noise_amp", CFG.humanization.pid_noise_amplitude)
+    dpg.set_value("cfg_hum_noise_dist", CFG.humanization.pid_noise_dist)
+    dpg.set_value("cfg_hum_cast_jitter", CFG.humanization.cast_animation_jitter)
+    dpg.set_value("cfg_hum_result_jitter", CFG.humanization.result_wait_jitter)
 
 
 def _on_top_changed(val):

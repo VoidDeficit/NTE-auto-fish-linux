@@ -9,27 +9,29 @@ import csv
 import ctypes
 import json
 import logging
+import logging.handlers
 import os
+import random
 import sys
 import threading
 import time
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Optional
 
-from screeninfo import get_monitors
-
-from config import CFG, AppConfig, DEFAULT_SETTINGS_PATH
+from config import CFG, AppConfig, DEFAULT_SETTINGS_PATH, jitter as cfg_jitter, sample_noise, sample_reaction
 from modules.logic import FishingState, FishingStateMachine, PIDController
 from modules.utils import APP_DIR, bundled_path
 
 # Third-party imports — deferred so deps can be auto-installed in __main__.
 try:
     import cv2
+    from screeninfo import get_monitors
     from modules.io_module import CaptureModule, InputModule
     from modules.vision import VisionModule
     _TP_LOADED = True
 except ImportError:
     cv2 = CaptureModule = InputModule = VisionModule = None  # type: ignore[assignment]
+    get_monitors = None  # type: ignore[assignment]
     _TP_LOADED = False
 
 if TYPE_CHECKING:
@@ -42,8 +44,7 @@ _DEFAULT_SCREEN_H = 2160
 _RESULT_CLOSE_FALLBACK_X = 960
 _RESULT_CLOSE_FALLBACK_Y = 540
 _BAR_WIDTH_RATIO = 0.375
-_MAX_STRUGGLE_SECS = 120.0
-_BAIT_ERROR_THRESHOLD = 3
+# _MAX_STRUGGLE_SECS and _BAIT_ERROR_THRESHOLD moved to TimingConfig
 
 
 def _resource_path(*parts: str) -> str:
@@ -55,7 +56,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("fishing_bot.log", encoding="utf-8"),
+        logging.handlers.RotatingFileHandler(
+            os.path.join(APP_DIR, "fishing_bot.log"),
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        ),
     ],
 )
 log = logging.getLogger("NTEFish")
@@ -92,6 +98,8 @@ class NTEFishingBot:
         self._fish_count = 0
         self._screen_w = 0
         self._screen_h = 0
+        self._mon_x = 0
+        self._mon_y = 0
         self._scaled_min_area = 50.0
 
         self._last_pid_out = 0.0
@@ -215,13 +223,21 @@ class NTEFishingBot:
             self.request_stop()
             self._log("Bot stop requested.")
 
-    @staticmethod
-    def get_active_monitor():
+    def get_active_monitor(self):
         monitors = get_monitors()
 
-        index = max(0, min(CFG.monitor_index, len(monitors) - 1))
+        index = max(0, min(self.cfg.monitor_index, len(monitors) - 1))
 
         return monitors[index]
+
+    def _offset_roi(self, roi: dict) -> dict:
+        """Shift a monitor-local ROI to screen-absolute coordinates."""
+        return {
+            "left": roi["left"] + self._mon_x,
+            "top": roi["top"] + self._mon_y,
+            "width": roi["width"],
+            "height": roi["height"],
+        }
 
     def calibrate(self) -> None:
         self._log("[Calibration] Capturing full screen...")
@@ -237,6 +253,7 @@ class NTEFishingBot:
 
         scene = self.capture.grab_bgr(region)
         self._screen_w, self._screen_h = mon.width, mon.height
+        self._mon_x, self._mon_y = mon.x, mon.y
         scale = min(self._screen_w / _DEFAULT_SCREEN_W, self._screen_h / _DEFAULT_SCREEN_H)
         self._scaled_min_area = max(50.0 * scale * scale, 1.0)
         pad = self.cfg.calibration.roi_padding
@@ -251,35 +268,35 @@ class NTEFishingBot:
                 data = json.load(handle)
             if data and isinstance(data, list) and "ratios" in data[0]:
                 ratios = data[0]["ratios"]
-                self._roi_bar = {
+                self._roi_bar = self._offset_roi({
                     "top": round(self._screen_h * ratios["top"]),
                     "left": round(self._screen_w * ratios["left"]),
                     "width": round(self._screen_w * ratios["width"]),
                     "height": round(self._screen_h * ratios["height"]),
-                }
+                })
                 self._log(f"[Calibration] Bar ROI (ratio) -> {self._roi_bar}")
             else:
                 raise ValueError("no valid ratio data")
         except Exception:
             scale_w = self._screen_w / _DEFAULT_SCREEN_W
             scale_h = self._screen_h / _DEFAULT_SCREEN_H
-            self._roi_bar = {
+            self._roi_bar = self._offset_roi({
                 "top": int(118 * scale_h),
                 "left": int(1209 * scale_w),
                 "width": int(1441 * scale_w),
                 "height": int(64 * scale_h),
-            }
+            })
             self._log(f"[Calibration] Bar ROI (fallback) -> {self._roi_bar}")
 
         # --- Button ROI (template matching with resolution fallback) ---
         scale_w = self._screen_w / _DEFAULT_SCREEN_W
         scale_h = self._screen_h / _DEFAULT_SCREEN_H
-        button_fallback = {
+        button_fallback = self._offset_roi({
             "top": int(1760 * scale_h),
             "left": int(3400 * scale_w),
             "width": int(440 * scale_w),
             "height": int(360 * scale_h),
-        }
+        })
 
         tmpl_f = cv2.imread(_resource_path("templates", "button_f.png"))
         if tmpl_f is not None:
@@ -290,12 +307,12 @@ class NTEFishingBot:
             )
             if result:
                 x1, y1, x2, y2 = result
-                self._roi_button = {
+                self._roi_button = self._offset_roi({
                     "top": max(0, y1 - pad),
                     "left": max(0, x1 - pad),
                     "width": (x2 - x1) + pad * 2,
                     "height": (y2 - y1) + pad * 2,
-                }
+                })
                 self._log(f"[Calibration] Button ROI (template) -> {self._roi_button}")
             else:
                 self._roi_button = button_fallback
@@ -317,13 +334,13 @@ class NTEFishingBot:
                 data = json.load(handle)
             if data and isinstance(data, list) and "ratios" in data[0]:
                 ratios = data[0]["ratios"]
-                self._roi_error = {
+                self._roi_error = self._offset_roi({
                     "top": round(self._screen_h * ratios["top"]),
                     "left": round(self._screen_w * ratios["left"]),
                     "width": round(self._screen_w * ratios["width"]),
                     "height": round(self._screen_h * ratios["height"]),
-                }
-                self._log(f"[Calibration] Loaded error ROI -> {self._roi_error}")
+                })
+                self._log(f"[Calibration] Loaded dialog ROI -> {self._roi_error}")
         except Exception as exc:
             self._log(f"Failed to load {error_json}: {exc}", logging.ERROR)
 
@@ -395,7 +412,9 @@ class NTEFishingBot:
         except KeyboardInterrupt:
             self._log("Ctrl+C received.")
         except Exception as exc:
-            self._log(f"Bot crashed: {exc}", logging.ERROR)
+            log.exception("Bot crashed")
+            if self.bridge:
+                self.bridge.push_log(f"Bot crashed: {exc}")
         finally:
             self._is_paused = True
             self._is_stopped = True
@@ -418,7 +437,10 @@ class NTEFishingBot:
     def _enter_struggling(self) -> None:
         """Common setup when transitioning into STRUGGLING from any state."""
         self._bait_error_count = 0
-        self.input.press(self.cfg.keys.cast, self.cfg.timing.key_press_duration)
+        hook_dur = self.cfg.timing.key_press_duration
+        if self.cfg.humanization.enabled:
+            hook_dur = cfg_jitter(hook_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+        self.input.press(self.cfg.keys.cast, hook_dur)
         self.pid.reset()
         self._lost_frames = 0
         self._lost_cursor_frames = 0
@@ -429,7 +451,10 @@ class NTEFishingBot:
 
     def _handle_idle(self) -> None:
         self._log("[IDLE] Casting...")
-        self.input.press(self.cfg.keys.cast, self.cfg.timing.key_press_duration)
+        cast_dur = self.cfg.timing.key_press_duration
+        if self.cfg.humanization.enabled:
+            cast_dur = cfg_jitter(cast_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+        self.input.press(self.cfg.keys.cast, cast_dur)
         # Check for error dialog shortly after cast (dialog appears immediately)
         self._stop_event.wait(timeout=0.3)
         if self._roi_error:
@@ -437,12 +462,15 @@ class NTEFishingBot:
             if self.vision.check_error_region(err_img):
                 self._bait_error_count += 1
                 self._log(
-                    f"[ERROR] Cast error ({self._bait_error_count}/{_BAIT_ERROR_THRESHOLD}), "
+                    f"[ERROR] Cast error ({self._bait_error_count}/{self.cfg.timing.bait_error_threshold}), "
                     "waiting for dialog to dismiss..."
                 )
                 self.input.release_all()
-                self._stop_event.wait(timeout=5.0)
-                if self._bait_error_count >= _BAIT_ERROR_THRESHOLD:
+                err_wait = 5.0
+                if self.cfg.humanization.enabled:
+                    err_wait = cfg_jitter(err_wait, self.cfg.humanization.error_dialog_jitter, minimum=3.0)
+                self._stop_event.wait(timeout=err_wait)
+                if self._bait_error_count >= self.cfg.timing.bait_error_threshold:
                     self._log("[ERROR] Bait likely exhausted, stopping bot.")
                     self.request_stop()
                     self._push_status()
@@ -451,7 +479,10 @@ class NTEFishingBot:
                 self._push_status()
                 return
         # No error, wait out the rest of the cast animation
-        remaining = self.cfg.timing.cast_animation_secs - 0.3
+        anim_secs = self.cfg.timing.cast_animation_secs
+        if self.cfg.humanization.enabled:
+            anim_secs = cfg_jitter(anim_secs, self.cfg.humanization.cast_animation_jitter, minimum=0.8)
+        remaining = anim_secs - 0.3
         if remaining > 0:
             self._stop_event.wait(timeout=remaining)
         if self._stop_flag:
@@ -476,9 +507,9 @@ class NTEFishingBot:
             self._stop_event.wait(timeout=self.cfg.timing.waiting_poll_interval)
 
     def _handle_struggling(self) -> None:
-        if self.sm.time_in_state > _MAX_STRUGGLE_SECS:
+        if self.sm.time_in_state > self.cfg.timing.max_struggle_secs:
             self._log(
-                f"[STRUGGLING] Max duration ({_MAX_STRUGGLE_SECS}s) reached, ending.",
+                f"[STRUGGLING] Max duration ({self.cfg.timing.max_struggle_secs}s) reached, ending.",
                 logging.WARNING,
             )
             self.input.release_all()
@@ -529,18 +560,53 @@ class NTEFishingBot:
             output = self.pid.update(float(cursor_x), float(target_x), bar_half_width=bar_half)
             self._last_pid_out = output
 
+            hcfg = self.cfg.humanization
             deadband = self.cfg.pid.deadband
-            if output > deadband:
-                self.input.hold(self.cfg.keys.right)
-                self.input.release(self.cfg.keys.left)
-                action = "RIGHT"
-            elif output < -deadband:
-                self.input.hold(self.cfg.keys.left)
-                self.input.release(self.cfg.keys.right)
-                action = "LEFT"
+
+            if hcfg.enabled:
+                # PID noise overlay
+                if hcfg.pid_noise_enabled:
+                    output += sample_noise(hcfg.pid_noise_amplitude, hcfg.pid_noise_dist)
+
+                # Reaction latency
+                react_delay = sample_reaction(
+                    hcfg.reaction_latency_min, hcfg.reaction_latency_max, hcfg.reaction_latency_dist,
+                )
+                if react_delay > 0:
+                    self._stop_event.wait(timeout=react_delay)
+
+                if output > deadband:
+                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
+                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
+                    self.input.release(self.cfg.keys.left)
+                    self.input.pulse_hold(self.cfg.keys.right, hold_t, gap_t, self._stop_event)
+                    action = "RIGHT"
+                elif output < -deadband:
+                    hold_t = random.uniform(hcfg.pulse_hold_min, hcfg.pulse_hold_max)
+                    gap_t = random.uniform(hcfg.pulse_release_min, hcfg.pulse_release_max)
+                    self.input.release(self.cfg.keys.right)
+                    self.input.pulse_hold(self.cfg.keys.left, hold_t, gap_t, self._stop_event)
+                    action = "LEFT"
+                else:
+                    self.input.release(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
+                    if hcfg.deadband_tap_enabled and random.random() < hcfg.deadband_tap_chance:
+                        tap_dir = self.cfg.keys.right if error > 0 else self.cfg.keys.left
+                        tap_dur = random.uniform(hcfg.deadband_tap_duration_min, hcfg.deadband_tap_duration_max)
+                        self.input.press(tap_dir, tap_dur)
+                    action = "NONE"
             else:
-                self.input.release(self.cfg.keys.left)
-                self.input.release(self.cfg.keys.right)
+                if output > deadband:
+                    self.input.hold(self.cfg.keys.right)
+                    self.input.release(self.cfg.keys.left)
+                    action = "RIGHT"
+                elif output < -deadband:
+                    self.input.hold(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
+                    action = "LEFT"
+                else:
+                    self.input.release(self.cfg.keys.left)
+                    self.input.release(self.cfg.keys.right)
         else:
             self.input.release(self.cfg.keys.left)
             self.input.release(self.cfg.keys.right)
@@ -606,7 +672,10 @@ class NTEFishingBot:
             self.input.release_all()
             self.sm.transition(FishingState.RESULT)
 
-        self._stop_event.wait(timeout=self.cfg.timing.struggling_poll_interval)
+        poll = self.cfg.timing.struggling_poll_interval
+        if self.cfg.humanization.enabled:
+            poll = cfg_jitter(poll, poll * 0.3, minimum=0.005)
+        self._stop_event.wait(timeout=poll)
 
     def _handle_result(self) -> None:
         # Check for error dialog early — it auto-dismisses in ~2s
@@ -618,7 +687,10 @@ class NTEFishingBot:
                 self._push_status()
                 return
 
-        self._stop_event.wait(timeout=self.cfg.timing.result_wait_secs)
+        result_w = self.cfg.timing.result_wait_secs
+        if self.cfg.humanization.enabled:
+            result_w = cfg_jitter(result_w, self.cfg.humanization.result_wait_jitter, minimum=1.0)
+        self._stop_event.wait(timeout=result_w)
         if self._stop_flag:
             return
 
@@ -654,12 +726,18 @@ class NTEFishingBot:
         self._fish_count += 1
         self._log(f"[RESULT] Fish #{self._fish_count}.")
         if self.cfg.result_close_method == "click":
-            cx = self._screen_w // 2 if self._screen_w else _RESULT_CLOSE_FALLBACK_X
-            cy = self._screen_h // 2 if self._screen_h else _RESULT_CLOSE_FALLBACK_Y
+            cx = self._mon_x + (self._screen_w // 2 if self._screen_w else _RESULT_CLOSE_FALLBACK_X)
+            cy = self._mon_y + (self._screen_h // 2 if self._screen_h else _RESULT_CLOSE_FALLBACK_Y)
             self.input.click(cx, cy)
         else:
-            self.input.press(self.cfg.keys.exit, self.cfg.timing.key_press_duration)
-        self._stop_event.wait(timeout=0.5)
+            exit_dur = self.cfg.timing.key_press_duration
+            if self.cfg.humanization.enabled:
+                exit_dur = cfg_jitter(exit_dur, self.cfg.humanization.cast_hold_jitter, minimum=0.02)
+            self.input.press(self.cfg.keys.exit, exit_dur)
+        close_delay = 0.5
+        if self.cfg.humanization.enabled:
+            close_delay = cfg_jitter(close_delay, self.cfg.humanization.post_close_jitter, minimum=0.2)
+        self._stop_event.wait(timeout=close_delay)
         if self._stop_flag:
             return
         self.sm.transition(FishingState.IDLE)
@@ -884,6 +962,7 @@ if __name__ == "__main__":
         from modules.deps import ensure_dependencies, CLI_PACKAGES
         ensure_dependencies(CLI_PACKAGES)
         import cv2  # noqa: F811
+        from screeninfo import get_monitors  # noqa: F811
         from modules.io_module import CaptureModule, InputModule  # noqa: F811
         from modules.vision import VisionModule  # noqa: F811
 

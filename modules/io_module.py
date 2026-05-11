@@ -6,6 +6,7 @@ wraps pydirectinput and tracks held keys so state changes can release them.
 """
 import threading
 import time
+from typing import Optional
 
 import mss
 import numpy as np
@@ -22,10 +23,13 @@ class CaptureModule:
 
     def __init__(self) -> None:
         self._sct = None
+        self._sct_lock = threading.Lock()
 
     def _get_sct(self):
         if self._sct is None:
-            self._sct = mss.mss()
+            with self._sct_lock:
+                if self._sct is None:
+                    self._sct = mss.mss()
         return self._sct
 
     def grab_bgr(self, roi: dict) -> np.ndarray:
@@ -60,8 +64,10 @@ class InputModule:
     def press(self, key: str, duration: float = 0.05) -> None:
         """Press and release a key without changing the held-key set."""
         pydirectinput.keyDown(key)
-        time.sleep(duration)
-        pydirectinput.keyUp(key)
+        try:
+            time.sleep(duration)
+        finally:
+            pydirectinput.keyUp(key)
 
     def hold(self, key: str) -> None:
         """Keep a key held down."""
@@ -80,6 +86,30 @@ class InputModule:
             if key in self._held:
                 pydirectinput.keyUp(key)
                 self._held.discard(key)
+
+    def pulse_hold(
+        self, key: str, hold_secs: float, release_secs: float,
+        stop_event: Optional[threading.Event] = None,
+    ) -> None:
+        """Hold a key for hold_secs, then release for release_secs.
+
+        Used for humanized pulsing during STRUGGLING state. The key is
+        tracked in _held during the hold phase so release_all() can
+        clean it up if the bot stops mid-pulse.  Pass *stop_event* to
+        make the sleeps interruptible.
+        """
+        wait = stop_event.wait if stop_event else time.sleep
+        with self._lock:
+            self._held.add(key)
+        try:
+            pydirectinput.keyDown(key)
+            wait(timeout=hold_secs)
+        finally:
+            pydirectinput.keyUp(key)
+            with self._lock:
+                self._held.discard(key)
+        if release_secs > 0 and (stop_event is None or not stop_event.is_set()):
+            wait(timeout=release_secs)
 
     def release_all(self) -> None:
         """Release all tracked held keys."""
