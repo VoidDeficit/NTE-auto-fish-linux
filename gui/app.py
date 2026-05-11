@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 import threading
 
 import dearpygui.dearpygui as dpg
-import keyboard
 
 from config import CFG
 from gui.bridge import BotBridge
@@ -18,13 +18,21 @@ from main import NTEFishingBot
 from modules.utils import VERSION
 from screeninfo import get_monitors
 
+_WINDOWS = sys.platform == "win32"
 
-def _get_primary_monitor_size() -> tuple[int, int]:
-    """Return (width, height) of the primary monitor via Win32."""
-    user32 = ctypes.windll.user32
-    w = user32.GetSystemMetrics(0)
-    h = user32.GetSystemMetrics(1)
-    return w, h
+if _WINDOWS:
+    import keyboard as _keyboard
+else:
+    from pynput import keyboard as _pynput_kb
+
+
+def _to_pynput_hotkey(hotkey_str: str) -> str:
+    """Convert 'ctrl+f6' style string to pynput '<ctrl>+<f6>' style."""
+    result = []
+    for part in hotkey_str.lower().split("+"):
+        part = part.strip()
+        result.append(part if len(part) == 1 else f"<{part}>")
+    return "+".join(result)
 
 APP_TITLE = f"NTE Auto-Fish v{VERSION}"
 
@@ -53,6 +61,8 @@ class FishingGUI:
         self._build_ui()
 
     def _enable_hidpi(self):
+        if not _WINDOWS:
+            return
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
@@ -179,14 +189,25 @@ class FishingGUI:
         try:
             toggle = CFG.hotkeys.toggle.strip()
             stop = CFG.hotkeys.stop.strip()
-            if toggle:
-                self._hotkey_handles.append(
-                    keyboard.add_hotkey(toggle, self._toggle_bot_hotkey)
-                )
-            if stop:
-                self._hotkey_handles.append(
-                    keyboard.add_hotkey(stop, self._stop_bot_hotkey)
-                )
+            if _WINDOWS:
+                if toggle:
+                    self._hotkey_handles.append(
+                        _keyboard.add_hotkey(toggle, self._toggle_bot_hotkey)
+                    )
+                if stop:
+                    self._hotkey_handles.append(
+                        _keyboard.add_hotkey(stop, self._stop_bot_hotkey)
+                    )
+            else:
+                bindings = {}
+                if toggle:
+                    bindings[_to_pynput_hotkey(toggle)] = self._toggle_bot_hotkey
+                if stop:
+                    bindings[_to_pynput_hotkey(stop)] = self._stop_bot_hotkey
+                if bindings:
+                    listener = _pynput_kb.GlobalHotKeys(bindings)
+                    listener.start()
+                    self._hotkey_handles.append(listener)
             self.bridge.push_log(
                 "Hotkeys active: "
                 f"toggle={toggle.upper() if toggle else 'disabled'}, "
@@ -198,7 +219,10 @@ class FishingGUI:
     def _clear_hotkeys(self):
         for handle in self._hotkey_handles:
             try:
-                keyboard.remove_hotkey(handle)
+                if _WINDOWS:
+                    _keyboard.remove_hotkey(handle)
+                else:
+                    handle.stop()
             except Exception:
                 pass
         self._hotkey_handles.clear()
